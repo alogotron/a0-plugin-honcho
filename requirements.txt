@@ -1,0 +1,9 @@
+# Honcho Plugin for Agent Zero — Python dependencies
+#
+# Install: pip install -r requirements.txt
+#
+# The honcho-ai SDK is published by Plastic Labs:
+# https://pypi.org/project/honcho-ai/
+# https://github.com/plastic-labs/honcho-python
+
+honcho-ai>=2.0.0,<3.0.0

@@ -1,0 +1,17 @@
+Honcho Plugin for Agent Zero
+Copyright 2025 Algotron Contributors
+
+This product includes software developed as a community integration
+between Agent Zero (https://github.com/agent0ai/agent-zero) and
+Honcho (https://honcho.dev).
+
+Honcho is a product of Plastic Labs, Inc. (https://plasticlabs.ai).
+"Honcho" is a trademark of Plastic Labs, Inc., used in this project
+for descriptive purposes only. This project is not affiliated with,
+endorsed by, or sponsored by Plastic Labs, Inc.
+
+The honcho-ai Python SDK is licensed under the MIT License:
+https://github.com/plastic-labs/honcho-python/blob/main/LICENSE
+
+Agent Zero is licensed under the Apache License 2.0:
+https://github.com/agent0ai/agent-zero/blob/main/LICENSE
