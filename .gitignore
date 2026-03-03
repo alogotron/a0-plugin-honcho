@@ -1,8 +1,10 @@
 __pycache__/
 *.pyc
 *.pyo
-.env
+.toggle-0
+.toggle-1
 *.egg-info/
 dist/
 build/
-.DS_Store
+.env
+secrets.env

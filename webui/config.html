@@ -1,0 +1,113 @@
+<html>
+<head>
+    <title>Honcho</title>
+</head>
+
+<body>
+    <div x-data>
+        <template x-if="$store.pluginSettings.settings">
+            <div>
+                <div class="section-title">Honcho Conversational Memory</div>
+                <div class="section-description">
+                    Persistent user context across chat sessions via
+                    <a href="https://honcho.dev" target="_blank">Honcho Cloud</a>
+                    by Plastic Labs. Requires a free API key.
+                </div>
+
+                <div class="field">
+                    <div class="field-label">
+                        <div class="field-title">Workspace ID</div>
+                        <div class="field-description">
+                            Honcho workspace name. Can also be overridden via
+                            the <code>HONCHO_WORKSPACE_ID</code> secret.
+                        </div>
+                    </div>
+                    <div class="field-control">
+                        <input type="text"
+                               x-model="$store.pluginSettings.settings.honcho_workspace_id"
+                               placeholder="agent-zero" />
+                    </div>
+                </div>
+
+                <div class="field">
+                    <div class="field-label">
+                        <div class="field-title">User Peer ID</div>
+                        <div class="field-description">
+                            Identifier for the human peer in Honcho.
+                        </div>
+                    </div>
+                    <div class="field-control">
+                        <input type="text"
+                               x-model="$store.pluginSettings.settings.honcho_user_id"
+                               placeholder="user" />
+                    </div>
+                </div>
+
+                <div class="field">
+                    <div class="field-label">
+                        <div class="field-title">Agent Peer ID</div>
+                        <div class="field-description">
+                            Identifier for the AI agent peer in Honcho.
+                        </div>
+                    </div>
+                    <div class="field-control">
+                        <input type="text"
+                               x-model="$store.pluginSettings.settings.honcho_agent_peer_id"
+                               placeholder="agent-zero" />
+                    </div>
+                </div>
+
+                <div class="field">
+                    <div class="field-label">
+                        <div class="field-title">Context Cache TTL (seconds)</div>
+                        <div class="field-description">
+                            How long to cache Honcho user context before refreshing.
+                        </div>
+                    </div>
+                    <div class="field-control">
+                        <input type="number"
+                               x-model.number="$store.pluginSettings.settings.honcho_cache_ttl"
+                               placeholder="120" />
+                    </div>
+                </div>
+
+                <div class="field">
+                    <div class="field-label">
+                        <div class="field-title">Max Context Tokens</div>
+                        <div class="field-description">
+                            Maximum tokens for the injected user context.
+                        </div>
+                    </div>
+                    <div class="field-control">
+                        <input type="number"
+                               x-model.number="$store.pluginSettings.settings.honcho_max_context_tokens"
+                               placeholder="500" />
+                    </div>
+                </div>
+
+                <div class="field">
+                    <div class="field-label">
+                        <div class="field-title">Debug Logging</div>
+                        <div class="field-description">
+                            Enable verbose logging for troubleshooting.
+                        </div>
+                    </div>
+                    <div class="field-control">
+                        <label class="toggle">
+                            <input type="checkbox"
+                                   x-model="$store.pluginSettings.settings.honcho_debug" />
+                            <span class="toggler"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="section-description" style="margin-top: 1rem; opacity: 0.7;">
+                    <strong>Note:</strong> The <code>HONCHO_API_KEY</code> must be set in
+                    <strong>Settings &rarr; Secrets</strong>. Get a free key at
+                    <a href="https://app.honcho.dev" target="_blank">app.honcho.dev</a>.
+                </div>
+            </div>
+        </template>
+    </div>
+</body>
+</html>

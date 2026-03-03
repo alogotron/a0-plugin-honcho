@@ -1,182 +1,99 @@
-"""Honcho Integration Helper for Agent Zero.
-
-Provides a clean, secure interface between Agent Zero and the Honcho
-conversational-memory platform (https://honcho.dev).
-
-SDK requirement: ``honcho-ai >= 2.0, < 3.0``
+"""
+Honcho Integration Helper for Agent Zero
+Clean implementation following A0 plugin conventions.
 """
 
-from __future__ import annotations
-
-import logging
 import time
-from functools import wraps
-from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
+from typing import Optional, Dict, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agent import AgentContext
 
-log = logging.getLogger("honcho")
+try:
+    from honcho import Honcho
+    HONCHO_AVAILABLE = True
+except ImportError:
+    HONCHO_AVAILABLE = False
+    Honcho = None
 
-# ── Constants ─────────────────────────────────────────────────
-DEFAULT_WORKSPACE_ID: str = "agent-zero"
-DEFAULT_USER_ID: str = "user"
-CONTEXT_CACHE_TTL: int = 120  # seconds
-MAX_MESSAGE_LENGTH: int = 10_000  # chars sent to Honcho
-LOG_CONTENT_PREVIEW: int = 80  # max chars shown in logs
-
-# Retry settings
-_RETRY_ATTEMPTS: int = 3
-_RETRY_BASE_DELAY: float = 0.5  # seconds, doubles each attempt
-
-# ── Module-level caches ───────────────────────────────────────
+# Caches
 _context_cache: Dict[str, tuple] = {}
 _client_cache: Dict[str, Any] = {}
 
-# ── SDK availability ──────────────────────────────────────────
-HONCHO_AVAILABLE: bool = False
-Honcho: Any = None
 
-try:
-    from honcho import Honcho as _Honcho  # type: ignore[import-untyped]
-
-    Honcho = _Honcho
-    HONCHO_AVAILABLE = True
-    log.debug("Honcho SDK imported successfully")
-
-    # ── SDK version validation ────────────────────────────────
+def _log(context, msg: str, log_type: str = "info"):
+    """Log using A0's logging system via context.log."""
     try:
-        from importlib.metadata import version as _pkg_version
-
-        _sdk_version = _pkg_version("honcho-ai")
-        _major = int(_sdk_version.split(".")[0])
-        if _major < 2 or _major >= 3:
-            log.warning(
-                "honcho-ai %s detected — this plugin is tested with "
-                ">=2.0.0,<3.0.0. Unexpected behaviour may occur.",
-                _sdk_version,
-            )
+        if context and hasattr(context, 'log'):
+            context.log.log(type=log_type, heading=msg)
         else:
-            log.debug("honcho-ai version %s (compatible)", _sdk_version)
+            print(f"[Honcho] {msg}")
     except Exception:
-        log.debug("Could not determine honcho-ai version")
-
-except ImportError:
-    log.debug("Honcho SDK not installed — integration disabled")
+        print(f"[Honcho] {msg}")
 
 
-# ── Helpers ───────────────────────────────────────────────────
-def _truncate(text: str, limit: int = LOG_CONTENT_PREVIEW) -> str:
-    """Return a truncated preview of *text* safe for logging."""
-    if len(text) <= limit:
-        return text
-    return text[:limit] + "…[truncated]"
+def _get_plugin_config(agent) -> Dict[str, Any]:
+    """Read plugin settings from A0's config system with fallbacks."""
+    config = {}
+    defaults = {
+        "honcho_workspace_id": "agent-zero",
+        "honcho_user_id": "user",
+        "honcho_agent_peer_id": "agent-zero",
+        "honcho_cache_ttl": 120,
+        "honcho_max_context_tokens": 500,
+        "honcho_debug": False,
+    }
+    for key, default in defaults.items():
+        config[key] = getattr(agent.config, key, default)
+    return config
 
 
-def _retry(fn: Callable) -> Callable:
-    """Decorator: retry a function with exponential back-off on exception."""
-
-    @wraps(fn)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        last_exc: Optional[Exception] = None
-        delay = _RETRY_BASE_DELAY
-        for attempt in range(1, _RETRY_ATTEMPTS + 1):
-            try:
-                return fn(*args, **kwargs)
-            except Exception as exc:  # noqa: BLE001
-                last_exc = exc
-                if attempt < _RETRY_ATTEMPTS:
-                    log.debug(
-                        "Retry %d/%d for %s after %.1fs — %s",
-                        attempt,
-                        _RETRY_ATTEMPTS,
-                        fn.__name__,
-                        delay,
-                        exc,
-                    )
-                    time.sleep(delay)
-                    delay *= 2
-        log.error("%s failed after %d attempts: %s", fn.__name__, _RETRY_ATTEMPTS, last_exc)
-        raise last_exc  # type: ignore[misc]
-
-    return wrapper
-
-
-def _validate_role(role: str) -> str:
-    """Validate and normalise a message role string."""
-    role = role.strip().lower()
-    if role not in ("user", "assistant"):
-        raise ValueError(f"Invalid message role: {role!r}. Must be ‘user’ or ‘assistant’.")
-    return role
-
-
-def _validate_content(content: str, *, field: str = "content") -> str:
-    """Validate that *content* is a non-empty string."""
-    if not isinstance(content, str):
-        raise TypeError(f"{field} must be a string, got {type(content).__name__}")
-    content = content.strip()
-    if not content:
-        raise ValueError(f"{field} must not be empty")
-    return content
-
-
-# ── Config helpers ────────────────────────────────────────────
-def get_api_key(context: Optional[AgentContext] = None) -> Optional[str]:
-    """Retrieve ``HONCHO_API_KEY`` from Agent Zero’s secrets manager.
-
-    The key is **never** written to logs.
-    """
+def get_api_key(context: Optional["AgentContext"] = None) -> Optional[str]:
+    """Retrieve HONCHO_API_KEY from A0 secrets manager."""
     try:
         from python.helpers.secrets import get_secrets_manager
-
         secrets_mgr = get_secrets_manager(context)
         secrets = secrets_mgr.load_secrets()
-        value = secrets.get("HONCHO_API_KEY", "").strip()
-        return value or None
-    except Exception:
-        log.debug("Unable to load HONCHO_API_KEY from secrets manager")
+        key = secrets.get("HONCHO_API_KEY", "").strip() or None
+        return key
+    except Exception as e:
+        _log(context, f"Error loading API key: {e}", "error")
         return None
 
 
-def get_config_value(
-    key: str,
-    default: str,
-    context: Optional[AgentContext] = None,
-) -> str:
-    """Read a configuration value from secrets, falling back to *default*."""
-    if not key or not isinstance(key, str):
-        return default
+def _get_secret_value(key: str, default: str, context=None) -> str:
+    """Get a value from secrets with fallback."""
     try:
         from python.helpers.secrets import get_secrets_manager
-
         secrets_mgr = get_secrets_manager(context)
         secrets = secrets_mgr.load_secrets()
-        return secrets.get(key.upper(), "").strip() or default
+        return secrets.get(key, "").strip() or default
     except Exception:
         return default
 
 
-def is_configured(context: Optional[AgentContext] = None) -> bool:
-    """Return ``True`` when the Honcho SDK is available **and** an API key is set."""
-    return HONCHO_AVAILABLE and bool(get_api_key(context))
+def is_configured(context=None) -> bool:
+    """Check if Honcho SDK is available and API key is set."""
+    if not HONCHO_AVAILABLE:
+        return False
+    return bool(get_api_key(context))
 
 
-# ── Client management ─────────────────────────────────────────
-def get_client(context: Optional[AgentContext] = None) -> Any:
-    """Return a cached :class:`Honcho` client for the current workspace.
-
-    Returns ``None`` when the SDK is unavailable or misconfigured.
-    """
-    if not HONCHO_AVAILABLE or Honcho is None:
+def get_client(context=None) -> Optional[Any]:
+    """Get or create a cached Honcho client."""
+    if not HONCHO_AVAILABLE:
         return None
-
     api_key = get_api_key(context)
     if not api_key:
         return None
 
-    workspace_id = get_config_value(
-        "HONCHO_WORKSPACE_ID", DEFAULT_WORKSPACE_ID, context,
-    )
+    # Workspace ID: check secrets first (override), then plugin config
+    workspace_id = _get_secret_value("HONCHO_WORKSPACE_ID", "", context)
+    if not workspace_id and context and hasattr(context, 'agent0'):
+        config = _get_plugin_config(context.agent0)
+        workspace_id = config.get("honcho_workspace_id", "agent-zero")
+    if not workspace_id:
+        workspace_id = "agent-zero"
 
     if workspace_id in _client_cache:
         return _client_cache[workspace_id]
@@ -184,33 +101,40 @@ def get_client(context: Optional[AgentContext] = None) -> Any:
     try:
         client = Honcho(api_key=api_key, workspace_id=workspace_id)
         _client_cache[workspace_id] = client
-        log.info("Created Honcho client for workspace: %s", workspace_id)
+        _log(context, f"Connected to workspace: {workspace_id}", "util")
         return client
-    except Exception:
-        log.error("Failed to create Honcho client for workspace: %s", workspace_id)
+    except Exception as e:
+        _log(context, f"Client error: {e}", "error")
         return None
 
 
-# ── Session / user helpers ────────────────────────────────────
-def get_session_id(context: AgentContext) -> str:
-    """Derive a deterministic Honcho session ID from the A0 chat context."""
-    if hasattr(context, "id") and context.id:
+def get_session_id(context) -> str:
+    """Derive Honcho session ID from the A0 chat context."""
+    if hasattr(context, 'id') and context.id:
         return f"chat-{context.id}"
     return f"session-{id(context)}"
 
 
-def get_user_id(context: Optional[AgentContext] = None) -> str:
-    """Return the configured Honcho user identifier."""
-    return get_config_value("HONCHO_USER_ID", DEFAULT_USER_ID, context)
+def get_user_id(context=None) -> str:
+    """Get the Honcho user peer ID."""
+    user_id = _get_secret_value("HONCHO_USER_ID", "", context)
+    if not user_id and context and hasattr(context, 'agent0'):
+        config = _get_plugin_config(context.agent0)
+        user_id = config.get("honcho_user_id", "user")
+    return user_id or "user"
 
 
-# ── Lazy initialisation ───────────────────────────────────────
-def ensure_initialized(context: AgentContext) -> bool:
-    """Lazily initialise the Honcho session for *context*.
+def get_agent_peer_id(context=None) -> str:
+    """Get the Honcho agent peer ID."""
+    if context and hasattr(context, 'agent0'):
+        config = _get_plugin_config(context.agent0)
+        return config.get("honcho_agent_peer_id", "agent-zero")
+    return "agent-zero"
 
-    Returns ``True`` on success, ``False`` otherwise.
-    """
-    if hasattr(context, "_honcho") and context._honcho.get("enabled"):
+
+def ensure_initialized(context) -> bool:
+    """Ensure Honcho session is initialized for this context."""
+    if hasattr(context, '_honcho') and context._honcho.get('enabled'):
         return True
 
     if not is_configured(context):
@@ -220,50 +144,31 @@ def ensure_initialized(context: AgentContext) -> bool:
     if not client:
         return False
 
-    if not hasattr(context, "_honcho"):
-        context._honcho = {}  # type: ignore[attr-defined]
+    if not hasattr(context, '_honcho'):
+        context._honcho = {}
 
     session_id = get_session_id(context)
     try:
         session = client.session(session_id)
         user_peer = client.peer(get_user_id(context))
-        agent_peer = client.peer("agent-zero")
+        agent_peer = client.peer(get_agent_peer_id(context))
         try:
             session.add_peers([user_peer, agent_peer])
         except Exception:
-            pass  # peers may already exist
+            pass  # Peers may already be added
 
-        context._honcho["enabled"] = True
-        context._honcho["session_id"] = session_id
-        log.info("Initialised Honcho session: %s", session_id)
+        context._honcho['enabled'] = True
+        context._honcho['session_id'] = session_id
+        _log(context, f"Session initialized: {session_id}", "util")
         return True
-    except Exception as exc:
-        log.error("Honcho session init failed for %s: %s", session_id, exc)
-        context._honcho["enabled"] = False
+    except Exception as e:
+        _log(context, f"Init error: {e}", "error")
+        context._honcho['enabled'] = False
         return False
 
 
-# ── Message sync ──────────────────────────────────────────────
-@_retry
-def _push_message(client: Any, session_id: str, peer: Any, content: str) -> None:
-    """Push a single message to Honcho (retried internally)."""
-    session = client.session(session_id)
-    msg = peer.message(content[:MAX_MESSAGE_LENGTH])
-    session.add_messages([msg])
-
-
-def sync_message(context: AgentContext, role: str, content: str) -> bool:
-    """Validate and push a message to Honcho.
-
-    Returns ``True`` on success, ``False`` otherwise.
-    """
-    try:
-        role = _validate_role(role)
-        content = _validate_content(content)
-    except (ValueError, TypeError) as exc:
-        log.warning("sync_message validation failed: %s", exc)
-        return False
-
+def sync_message(context, role: str, content: str) -> bool:
+    """Sync a message to Honcho Cloud."""
     if not ensure_initialized(context):
         return False
 
@@ -273,44 +178,37 @@ def sync_message(context: AgentContext, role: str, content: str) -> bool:
 
     try:
         session_id = get_session_id(context)
-        user_id = get_user_id(context)
-        peer = client.peer(user_id if role == "user" else "agent-zero")
-        _push_message(client, session_id, peer, content)
-        log.debug(
-            "Synced %s message (%d chars) to %s: %s",
-            role,
-            len(content),
-            session_id,
-            _truncate(content),
-        )
+        session = client.session(session_id)
+
+        if role == "user":
+            peer = client.peer(get_user_id(context))
+        else:
+            peer = client.peer(get_agent_peer_id(context))
+
+        msg = peer.message(content[:10000])
+        session.add_messages([msg])
         return True
-    except Exception as exc:
-        log.error("sync_message failed: %s", exc)
+    except Exception as e:
+        _log(context, f"Sync error: {e}", "error")
         return False
 
 
-# ── User context retrieval ────────────────────────────────────
-def get_user_context(
-    context: AgentContext,
-    max_tokens: int = 500,
-) -> Optional[str]:
-    """Fetch summarised user context from Honcho (cached).
-
-    Results are cached for :data:`CONTEXT_CACHE_TTL` seconds.
-    """
-    if not isinstance(max_tokens, int) or max_tokens < 1:
-        max_tokens = 500
-
+def get_user_context(context, max_tokens: int = 500) -> Optional[str]:
+    """Fetch user context from Honcho for system prompt injection."""
     if not ensure_initialized(context):
         return None
 
-    session_id = get_session_id(context)
-
     # Check cache
+    session_id = get_session_id(context)
+    cache_ttl = 120
+    if context and hasattr(context, 'agent0'):
+        config = _get_plugin_config(context.agent0)
+        cache_ttl = config.get("honcho_cache_ttl", 120)
+
     if session_id in _context_cache:
-        cached_time, cached_ctx = _context_cache[session_id]
-        if time.time() - cached_time < CONTEXT_CACHE_TTL:
-            return cached_ctx
+        cached_time, cached_context = _context_cache[session_id]
+        if time.time() - cached_time < cache_ttl:
+            return cached_context
 
     client = get_client(context)
     if not client:
@@ -319,21 +217,20 @@ def get_user_context(
     try:
         session = client.session(session_id)
         ctx = session.context()
-        result: Optional[str] = None
-        if hasattr(ctx, "summary") and ctx.summary:
+        result = None
+        if hasattr(ctx, 'summary') and ctx.summary:
             result = ctx.summary
-        elif hasattr(ctx, "peer_representation") and ctx.peer_representation:
+        elif hasattr(ctx, 'peer_representation') and ctx.peer_representation:
             result = ctx.peer_representation
         _context_cache[session_id] = (time.time(), result)
         return result
-    except Exception as exc:
-        log.error("get_user_context failed for %s: %s", session_id, exc)
+    except Exception as e:
+        _log(context, f"Context error: {e}", "error")
         return None
 
 
-# ── Cache management ──────────────────────────────────────────
-def clear_context_cache(session_id: Optional[str] = None) -> None:
-    """Invalidate the context cache for one or all sessions."""
+def clear_context_cache(session_id: Optional[str] = None):
+    """Clear cached context."""
     global _context_cache
     if session_id:
         _context_cache.pop(session_id, None)

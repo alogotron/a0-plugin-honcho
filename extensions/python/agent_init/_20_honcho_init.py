@@ -1,67 +1,44 @@
-"""Honcho Initialization Extension.
-
-Activates the Honcho conversational-memory integration when an agent
-context starts.  If the SDK is missing or unconfigured the extension
-is silently skipped.
+"""
+Honcho Initialization Extension
+Initializes Honcho client when agent starts.
 """
 
-from __future__ import annotations
-
-import importlib.util
-import logging
 import os
-from pathlib import Path
-from typing import TYPE_CHECKING
+import sys
 
+from agent import AgentContext
 from python.helpers.extension import Extension
 
-if TYPE_CHECKING:
-    from agent import AgentContext
+# Resolve plugin root and ensure helpers are importable
+_PLUGIN_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+if _PLUGIN_ROOT not in sys.path:
+    sys.path.insert(0, _PLUGIN_ROOT)
 
-log = logging.getLogger("honcho")
-
-# ── Load helper via importlib (no sys.path mutation) ──────────
-_HELPER_PATH = str(
-    Path(__file__).resolve().parents[3] / "helpers" / "honcho_helper.py"
-)
-
-
-def _load_helper():
-    """Import honcho_helper without mutating sys.path."""
-    spec = importlib.util.spec_from_file_location("honcho_helper", _HELPER_PATH)
-    if spec is None or spec.loader is None:
-        return None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+from helpers import honcho_helper  # noqa: E402
 
 
 class HonchoInit(Extension):
-    """One-time Honcho integration bootstrap per agent context."""
 
-    async def execute(self, **kwargs) -> None:
-        """Initialise Honcho for the current agent context."""
+    async def execute(self, **kwargs):
+        """Initialize Honcho integration for this agent context."""
         context: AgentContext = self.agent.context
 
         try:
-            helper = _load_helper()
-            if helper is None:
-                log.debug("honcho_helper.py not found at %s", _HELPER_PATH)
-                return
+            if not honcho_helper.is_configured(context):
+                return  # Not configured, skip silently
 
-            if not helper.is_configured(context):
-                return  # SDK missing or API key not set — skip
-
-            client = helper.get_client(context)
+            client = honcho_helper.get_client(context)
             if client:
-                session_id = helper.get_session_id(context)
-                log.info("Honcho integration enabled (session: %s)", session_id)
+                session_id = honcho_helper.get_session_id(context)
+                honcho_helper._log(
+                    context,
+                    f"Integration enabled for session: {session_id}",
+                    "util",
+                )
 
-                if not hasattr(context, "_honcho"):
+                if not hasattr(context, '_honcho'):
                     context._honcho = {}
-                context._honcho["enabled"] = True
-                context._honcho["session_id"] = session_id
-        except ImportError as exc:
-            log.debug("Honcho helper unavailable: %s", exc)
-        except Exception as exc:
-            log.warning("Honcho init error (non-fatal): %s", exc)
+                context._honcho['enabled'] = True
+                context._honcho['session_id'] = session_id
+        except Exception as e:
+            honcho_helper._log(context, f"Init error: {e}", "error")

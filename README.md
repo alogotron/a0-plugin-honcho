@@ -1,331 +1,147 @@
-<!-- SPDX-License-Identifier: Apache-2.0 -->
+# 🧠 Honcho Conversational Memory Plugin for Agent Zero
 
-# Honcho Plugin for Agent Zero
+Persistent conversational memory via [Honcho Cloud](https://honcho.dev) by [Plastic Labs](https://plasticlabs.ai). Gives Agent Zero the ability to **remember users across chat sessions** — preferences, facts, context, and behavioral patterns.
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![SDK: honcho-ai](https://img.shields.io/badge/SDK-honcho--ai_v2.x-purple.svg)](https://pypi.org/project/honcho-ai/)
-[![Agent Zero: v0.8+](https://img.shields.io/badge/Agent_Zero-v0.8%2B-green.svg)](https://github.com/agent0ai/agent-zero)
-
-Connect [Agent Zero](https://github.com/agent0ai/agent-zero) with
-[Honcho](https://honcho.dev) — a conversational-memory platform that gives
-your agent **persistent user context** across sessions.
-
-> **Disclaimer:** This is a **community-built integration** and is not
-> officially maintained or endorsed by [Plastic Labs](https://plasticlabs.ai),
-> the creators of Honcho. Use of the Honcho name and service is for
-> descriptive purposes only.
-
----
-
-## ⚠️ Privacy & Data Flow Disclosure
-
-**Before enabling this plugin, please read this section carefully.**
-
-This plugin sends data to a **third-party cloud service** (Honcho, operated by Plastic Labs, Inc.).
-
-### What data is sent
-
-| Data | Destination | Purpose |
-|------|------------|--------|
-| **All user messages** (full text) | Honcho Cloud API | Stored for conversational memory |
-| **All assistant responses** (full text) | Honcho Cloud API | Stored for conversational memory |
-| **Session identifiers** | Honcho Cloud API | Links messages to chat sessions |
-| **Workspace & User IDs** | Honcho Cloud API | Organizes data in your Honcho account |
-
-### What data is NOT sent
-
-- Agent Zero system prompts
-- Local files or tool outputs
-- Other plugin data
-- API keys for other services
-
-### Where data is stored
-
-Data is stored on **Honcho's cloud infrastructure** managed by Plastic Labs.
-Refer to Honcho's privacy and data handling policies:
-- [Honcho Documentation](https://docs.honcho.dev)
-- [Plastic Labs](https://plasticlabs.ai)
-
-### Data retention
-
-Data persists in Honcho **indefinitely** unless you manually delete it
-through the Honcho API or dashboard. This plugin does **not** provide
-automatic data deletion or expiration.
-
-### Who can access the data
-
-Anyone with your `HONCHO_API_KEY` can access all data stored in the
-associated Honcho workspace. Treat this key as a sensitive credential.
-
-### Consent
-
-By configuring and enabling this plugin (adding `HONCHO_API_KEY` to
-Secrets), you **consent** to:
-1. Sending all conversation messages to Honcho Cloud
-2. Honcho storing and processing that data per their terms
-3. Honcho generating summaries and context from your conversations
-
-**If you do not agree, do not add the API key. The plugin remains
-inactive without it.**
-
----
-
-## Features
+## What It Does
 
 | Feature | Description |
-|---|---|
-| **Automatic Message Sync** | Every user and assistant message is pushed to Honcho in real time. |
-| **Persistent User Context** | User preferences and facts survive across separate chat sessions. |
-| **System-Prompt Injection** | Summarised context is injected automatically so the agent "remembers". |
-| **Lazy Initialisation** | No restart required — add the API key and the plugin activates on the next message. |
-| **Retry & Resilience** | API calls use exponential back-off; transient errors do not crash the agent. |
-| **Secure by Default** | API key loaded only from the secrets manager; never logged. |
-| **Graceful Degradation** | If Honcho is unavailable, the agent continues normally without context. |
+|---------|-------------|
+| **Automatic Message Sync** | Every user and assistant message is pushed to Honcho in real time |
+| **Persistent User Context** | User preferences and facts survive across separate chat sessions |
+| **System-Prompt Injection** | Summarised context is fetched and injected automatically so the agent "remembers" |
+| **Graceful Degradation** | If Honcho is unavailable, the agent continues normally |
+| **Settings UI** | Configure workspace, peer IDs, cache TTL directly in A0's settings |
+| **Plugin System Conformant** | Built for A0's plugin architecture (`plugin.yaml`, extensions, settings) |
 
----
-
-## Architecture
+## How It Works
 
 ```
-┌─────────────────────────┐          ┌───────────────────────┐
-│      Agent Zero         │          │     Honcho Cloud       │
-│                         │          │                       │
-│  ┌───────────────────┐  │   REST   │  ┌─────────────────┐ │
-│  │  agent_init       │  │─────────▶│  │  Sessions        │ │
-│  │  _20_honcho_init  │  │          │  │  Peers           │ │
-│  └─────────┬─────────┘  │          │  │  Messages        │ │
-│           │              │          │  │  Context/Summary │ │
-│  ┌─────────┴─────────┐  │          │  └─────────────────┘ │
-│  │  hist_add_before  │  │─────────▶│                       │
-│  │  _20_honcho_sync  │  │  push    │  Messages are stored   │
-│  └─────────┬─────────┘  │  msgs    │  and summarised by     │
-│           │              │          │  Honcho's backend.     │
-│  ┌─────────┴──────────┐ │          │                       │
-│  │  system_prompt      │ │─────────▶│  Context is fetched    │
-│  │  _30_honcho_context │ │  fetch   │  and cached (120s TTL) │
-│  └──────────┬─────────┘ │  ctx     │                       │
-│           │              │          │                       │
-│  ┌─────────┴─────────┐  │          │                       │
-│  │  honcho_helper.py │  │          │                       │
-│  │  (shared core)    │  │          │                       │
-│  └───────────────────┘  │          │                       │
-└─────────────────────────┘          └───────────────────────┘
+┌─────────────┐     messages      ┌──────────────┐     conclusions     ┌──────────────┐
+│  Agent Zero  │ ───────────────▶  │ Honcho Cloud │ ──────────────────▶ │  Peer Cards  │
+│  (your chat) │                   │  (memory)    │   dreaming cycle    │  (knowledge) │
+└──────┬───────┘                   └──────┬───────┘                     └──────────────┘
+       │                                  │
+       │◀──── context injection ──────────┘
+       │      (system prompt)
 ```
 
-### Data Flow
-
-1. **`_20_honcho_init`** — On agent start, creates a Honcho session
-   mapped to the A0 chat ID (`chat-{context.id}`).
-2. **`_20_honcho_sync`** — Before each message is persisted in A0's
-   history, it is pushed to the Honcho session.
-3. **`_30_honcho_context`** — When the system prompt is assembled,
-   summarised user context is fetched (with caching) and appended.
-4. **`honcho_helper.py`** — Shared library handling SDK calls, retries,
-   caching, validation, and secret management.
-
----
-
-## Prerequisites
-
-| Requirement | Version |
-|---|---|
-| Agent Zero | v0.8 or later |
-| Python | 3.10+ |
-| `honcho-ai` SDK | >=2.0.0,<3.0.0 (`pip install honcho-ai`) |
-| Honcho API key | [app.honcho.dev/api-keys](https://app.honcho.dev/api-keys) |
-
----
+1. **Message Sync** — When you chat, messages are mirrored to Honcho via the `hist_add_before` extension
+2. **Context Retrieval** — On each turn, user context is fetched from Honcho and injected into the system prompt
+3. **Dreaming** — Honcho's background process consolidates observations into peer cards (persistent user/agent knowledge)
 
 ## Installation
 
-### 1. Install the SDK
+### 1. Clone into Agent Zero's user plugins directory
 
 ```bash
-pip install "honcho-ai>=2.0.0,<3.0.0"
+cd /a0/usr/plugins
+git clone https://github.com/alogotron/a0-plugin-honcho.git honcho
 ```
 
-### 2. Copy the plugin
+### 2. Install dependencies
 
-Place the `honcho/` directory inside your Agent Zero `plugins/` folder:
+```bash
+# Install into A0's runtime Python (important: use the correct venv)
+/opt/venv-a0/bin/pip install -r /a0/usr/plugins/honcho/requirements.txt
 
+# Also install for pyenv if applicable
+/opt/pyenv/versions/3.12.4/bin/pip install honcho-ai
 ```
-agent-zero/
-└── plugins/
-    └── honcho/          ← this folder
-```
 
-### 3. Configure secrets
+### 3. Get a Honcho API key
 
-Open **Settings → Secrets** in the Agent Zero UI and add:
+1. Go to [app.honcho.dev](https://app.honcho.dev)
+2. Create a free account
+3. Generate an API key
 
-| Secret | Required | Default | Description |
-|---|---|---|---|
-| `HONCHO_API_KEY` | **Yes** | — | Your Honcho API key |
-| `HONCHO_WORKSPACE_ID` | No | `agent-zero` | Workspace identifier |
-| `HONCHO_USER_ID` | No | `user` | User identifier |
+### 4. Configure in Agent Zero
 
-> **Security recommendation:** Create a dedicated Honcho workspace
-> specifically for Agent Zero rather than sharing one with other
-> applications.
+1. Go to **Settings → Secrets** and add:
+   - `HONCHO_API_KEY` — your API key from Honcho
+   - `HONCHO_WORKSPACE_ID` — (optional) workspace name, defaults to `agent-zero`
 
-### 4. Restart Agent Zero (or just start chatting)
+2. Go to **Settings → Plugins** and enable **Honcho Conversational Memory**
 
-The plugin uses lazy initialisation — it activates automatically on the
-next message once the API key is present.
+3. (Optional) Click **Configure** on the plugin to adjust:
+   - Workspace ID
+   - User/Agent peer IDs
+   - Context cache TTL
+   - Max context tokens
 
----
+### 5. Restart Agent Zero
+
+The plugin will be discovered on restart. You'll see `[Honcho] Integration enabled for session: chat-xxxxx` in the logs.
 
 ## Plugin Structure
 
 ```
-plugins/honcho/
+honcho/
+├── plugin.yaml                          # Plugin manifest
+├── default_config.yaml                  # Settings defaults
+├── requirements.txt                     # honcho-ai>=2.0.0
+├── LICENSE                              # MIT
 ├── helpers/
-│   └── honcho_helper.py                           # Core client & utilities
+│   └── honcho_helper.py                 # Core integration logic
 ├── extensions/
 │   └── python/
 │       ├── agent_init/
-│       │   └── _20_honcho_init.py                  # Bootstrap on agent start
+│       │   └── _20_honcho_init.py       # Initialize Honcho on agent start
 │       ├── hist_add_before/
-│       │   └── _20_honcho_sync.py                  # Push messages to Honcho
+│       │   └── _20_honcho_sync.py       # Sync messages to Honcho
 │       └── system_prompt/
-│           └── _30_honcho_context.py                # Inject user context
-├── plugin.yaml                                     # Marketplace metadata
-├── requirements.txt                                # Pinned dependencies
-├── README.md
-├── NOTICE
-└── LICENSE
+│           └── _30_honcho_context.py    # Inject user context into prompt
+├── prompts/
+│   └── honcho.context.md                # Context injection template
+└── webui/
+    └── config.html                      # Settings UI
 ```
 
----
+## Configuration
 
-## Configuration Reference
+### Secrets (Settings → Secrets)
 
-| Parameter | Source | Default | Description |
-|---|---|---|---|
-| `HONCHO_API_KEY` | Secrets | — | API key for Honcho (required) |
-| `HONCHO_WORKSPACE_ID` | Secrets | `agent-zero` | Logical workspace grouping |
-| `HONCHO_USER_ID` | Secrets | `user` | Identity for the human user |
-| `CONTEXT_CACHE_TTL` | Code constant | `120` (seconds) | How long fetched context is cached |
-| `MAX_MESSAGE_LENGTH` | Code constant | `10 000` (chars) | Messages are truncated before sending |
-| `_RETRY_ATTEMPTS` | Code constant | `3` | Max retries on transient API errors |
-| `_RETRY_BASE_DELAY` | Code constant | `0.5` (seconds) | Initial back-off delay (doubles each retry) |
+| Key | Required | Default | Description |
+|-----|----------|---------|-------------|
+| `HONCHO_API_KEY` | ✅ Yes | — | Your Honcho API key |
+| `HONCHO_WORKSPACE_ID` | No | `agent-zero` | Override workspace (also configurable in plugin settings) |
+| `HONCHO_USER_ID` | No | `user` | Override user peer ID |
 
----
+### Plugin Settings (Settings → Plugins → Honcho → Configure)
 
-## Disabling the Plugin
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Workspace ID | `agent-zero` | Honcho workspace name |
+| User Peer ID | `user` | Human peer identifier |
+| Agent Peer ID | `agent-zero` | AI agent peer identifier |
+| Cache TTL | `120` seconds | How long to cache context |
+| Max Context Tokens | `500` | Max tokens for injected context |
+| Debug Logging | `false` | Verbose logging |
 
-Remove (or clear) `HONCHO_API_KEY` from **Settings → Secrets**.  The
-integration will silently skip all hooks on the next message.
+## Honcho Concepts
 
-Alternatively, move or delete the `plugins/honcho/` directory.
+| Concept | Description |
+|---------|-------------|
+| **Workspace** | Top-level container for all memory data |
+| **Peer** | An entity (user or agent) with a card and conclusions |
+| **Session** | A conversation thread, maps 1:1 to an A0 chat |
+| **Conclusion** | An individual observation Honcho has made |
+| **Card** | Compiled summary of key facts about a peer |
+| **Dreaming** | Background process that consolidates conclusions into cards |
 
-> **Note:** Disabling the plugin does **not** delete data already stored
-> in Honcho. To delete stored data, use the Honcho API or dashboard
-> directly.
+## Requirements
 
----
-
-## Security
-
-### Credential handling
-
-- The API key is retrieved **exclusively** from Agent Zero's secrets
-  manager and is **never** written to log output or files.
-- Secrets are loaded per-request, not cached in environment variables.
-
-### Logging safety
-
-- Message content is **truncated** in all log messages (≤80 chars).
-- API keys and tokens are **never** included in logs at any level.
-- No file-based debug logs are created by this plugin.
-
-### Input validation
-
-- All message content is validated (non-empty, string type) before
-  sending to Honcho.
-- Message roles are strictly limited to `user` and `assistant`.
-- Content is truncated to `MAX_MESSAGE_LENGTH` (10,000 chars) before
-  transmission.
-
-### Network security
-
-- All communication with Honcho uses **HTTPS** (enforced by the SDK).
-- Retry logic uses exponential back-off (3 attempts, starting at 0.5s)
-  to avoid overwhelming the API during outages.
-- On failure, the plugin **degrades gracefully** — the agent continues
-  functioning without Honcho context.
-
-### Supply chain
-
-- The only external dependency is [`honcho-ai`](https://pypi.org/project/honcho-ai/),
-  published by [Plastic Labs](https://github.com/plastic-labs).
-- The SDK version is pinned to `>=2.0.0,<3.0.0` in `requirements.txt`
-  to prevent unexpected breaking changes.
-
----
-
-## Troubleshooting
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| No context injected | API key missing or empty | Add `HONCHO_API_KEY` in Settings → Secrets |
-| `Honcho SDK not installed` in logs | `honcho-ai` package missing | Run `pip install "honcho-ai>=2.0.0,<3.0.0"` in the A0 container |
-| `sync_message failed` errors | Network / Honcho outage | Check connectivity; retries handle transient issues automatically |
-| Stale context | Cache TTL not expired | Wait ~2 min or restart agent; cache TTL is 120 s |
-| `Invalid message role` warning | Extension received unexpected role | Ensure only `user`/`assistant` messages reach the sync hook |
-| Plugin not activating | Plugin directory misplaced | Verify path is `plugins/honcho/` at the A0 root |
-
-### Logging
-
-All plugin logs use the `honcho` logger.  Increase verbosity with:
-
-```python
-import logging
-logging.getLogger("honcho").setLevel(logging.DEBUG)
-```
-
-Message **content is never logged in full** — only a truncated preview
-(≤80 chars) appears at `DEBUG` level.
-
----
-
-## SDK Compatibility
-
-| SDK | Tested |
-|---|---|
-| `honcho-ai` 2.0.x | ✅ |
-| `honcho-ai` 2.1.x | ✅ (expected) |
-
----
-
-## Third-Party Services
-
-This plugin integrates with the following external service:
-
-| Service | Provider | Purpose | Data sent |
-|---------|----------|---------|-----------|
-| [Honcho](https://honcho.dev) | [Plastic Labs, Inc.](https://plasticlabs.ai) | Conversational memory & user context | All chat messages |
-
-By using this plugin you agree to Honcho's terms of service and privacy
-policy. This plugin's authors are **not responsible** for how Honcho
-stores, processes, or handles your data.
-
----
-
-## License
-
-[Apache License 2.0](LICENSE)
-
-This project is independently licensed and is **not affiliated with**
-Plastic Labs or the Honcho project. "Honcho" is a trademark of Plastic
-Labs, Inc., used here for descriptive purposes only.
-
----
+- Agent Zero (development branch with plugin system)
+- Python 3.12+
+- `honcho-ai` >= 2.0.0
+- Free Honcho account at [honcho.dev](https://honcho.dev)
 
 ## Links
 
 - [Honcho Documentation](https://docs.honcho.dev)
-- [Honcho Python SDK](https://github.com/plastic-labs/honcho-python)
-- [Honcho Privacy / Terms](https://honcho.dev) *(check their site for current policies)*
+- [Honcho Dashboard](https://app.honcho.dev)
 - [Agent Zero](https://github.com/agent0ai/agent-zero)
-- [Agent Zero Plugin System](https://github.com/agent0ai/a0-plugins)
+- [Plastic Labs](https://plasticlabs.ai)
+
+## License
+
+MIT

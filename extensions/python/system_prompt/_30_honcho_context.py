@@ -1,79 +1,43 @@
-"""Honcho Context Injection Extension.
-
-Injects persistent user context from Honcho into the agent’s system
-prompt.  Uses lazy initialisation — no restart required when secrets
-are added after startup.
+"""
+Honcho Context Injection Extension
+Injects user context from Honcho into the system prompt.
 """
 
-from __future__ import annotations
+import os
+import sys
 
-import importlib.util
-import logging
-from pathlib import Path
-from typing import TYPE_CHECKING
-
+from agent import AgentContext
 from python.helpers.extension import Extension
 
-if TYPE_CHECKING:
-    from agent import AgentContext
+# Resolve plugin root and ensure helpers are importable
+_PLUGIN_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+if _PLUGIN_ROOT not in sys.path:
+    sys.path.insert(0, _PLUGIN_ROOT)
 
-log = logging.getLogger("honcho")
-
-# ── Load helper via importlib (no sys.path mutation) ──────────
-_HELPER_PATH = str(
-    Path(__file__).resolve().parents[3] / "helpers" / "honcho_helper.py"
-)
-
-_helper_module = None
-
-
-def _get_helper():
-    """Lazily load and cache honcho_helper without mutating sys.path."""
-    global _helper_module
-    if _helper_module is not None:
-        return _helper_module
-    spec = importlib.util.spec_from_file_location("honcho_helper", _HELPER_PATH)
-    if spec is None or spec.loader is None:
-        return None
-    mod = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(mod)
-    except Exception as exc:
-        log.debug("Failed to load honcho_helper: %s", exc)
-        return None
-    _helper_module = mod
-    return mod
-
-
-_CONTEXT_TEMPLATE = """
-
-# Honcho User Context
-- Persistent memory about the user from previous conversations.
-- Use this information to personalise responses.
-
-<honcho_context>
-{context}
-</honcho_context>
-"""
+from helpers import honcho_helper  # noqa: E402
 
 
 class HonchoContext(Extension):
-    """Append Honcho user context to the system prompt."""
 
-    async def execute(self, **kwargs) -> str:
-        """Return a system-prompt fragment with Honcho context, or empty string."""
+    async def execute(self, system_prompt: list[str] = [], **kwargs):
+        """Add Honcho user context to system prompt."""
         context: AgentContext = self.agent.context
 
         try:
-            helper = _get_helper()
-            if helper is None:
-                return ""
+            max_tokens = 500
+            if hasattr(context, 'agent0'):
+                config = honcho_helper._get_plugin_config(context.agent0)
+                max_tokens = config.get("honcho_max_context_tokens", 500)
 
-            user_context = helper.get_user_context(context, max_tokens=500)
+            user_context = honcho_helper.get_user_context(
+                context, max_tokens=max_tokens
+            )
 
             if user_context and user_context.strip():
-                return _CONTEXT_TEMPLATE.format(context=user_context.strip())
-        except Exception as exc:
-            log.warning("Honcho context injection error (non-fatal): %s", exc)
-
-        return ""
+                prompt = self.agent.read_prompt(
+                    "honcho.context.md",
+                    user_context=user_context,
+                )
+                system_prompt.append(prompt)
+        except Exception as e:
+            honcho_helper._log(context, f"Context error (non-fatal): {e}", "error")

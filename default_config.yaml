@@ -1,0 +1,8 @@
+# Honcho plugin configuration defaults
+# API key is stored in secrets (HONCHO_API_KEY), not here
+honcho_workspace_id: "agent-zero"
+honcho_user_id: "user"
+honcho_agent_peer_id: "agent-zero"
+honcho_cache_ttl: 120
+honcho_max_context_tokens: 500
+honcho_debug: false

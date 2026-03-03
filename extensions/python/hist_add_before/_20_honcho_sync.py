@@ -1,87 +1,56 @@
-"""Honcho Message Sync Extension.
-
-Pushes each user/assistant message to Honcho when it is added to the
-Agent Zero conversation history.
+"""
+Honcho Message Sync Extension
+Syncs messages to Honcho when added to conversation history.
 """
 
-from __future__ import annotations
+import os
+import sys
 
-import importlib.util
-import logging
-from pathlib import Path
-from typing import Any, TYPE_CHECKING
-
+from agent import AgentContext
 from python.helpers.extension import Extension
 
-if TYPE_CHECKING:
-    from agent import AgentContext
+# Resolve plugin root and ensure helpers are importable
+_PLUGIN_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+if _PLUGIN_ROOT not in sys.path:
+    sys.path.insert(0, _PLUGIN_ROOT)
 
-log = logging.getLogger("honcho")
-
-# ── Load helper via importlib (no sys.path mutation) ──────────
-_HELPER_PATH = str(
-    Path(__file__).resolve().parents[3] / "helpers" / "honcho_helper.py"
-)
-
-_helper_module = None
-
-
-def _get_helper():
-    """Lazily load and cache honcho_helper without mutating sys.path."""
-    global _helper_module
-    if _helper_module is not None:
-        return _helper_module
-    spec = importlib.util.spec_from_file_location("honcho_helper", _HELPER_PATH)
-    if spec is None or spec.loader is None:
-        return None
-    mod = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(mod)
-    except Exception as exc:
-        log.debug("Failed to load honcho_helper: %s", exc)
-        return None
-    _helper_module = mod
-    return mod
-
-
-def _extract_content(content_data: Any) -> str:
-    """Recursively extract a plain-text string from *content_data*."""
-    raw = content_data
-    depth = 0
-    while isinstance(raw, dict) and depth < 10:
-        extracted = raw.get("content") or raw.get("text") or raw.get("message")
-        if extracted is None:
-            return str(raw)
-        raw = extracted
-        depth += 1
-    return raw if isinstance(raw, str) else str(raw) if raw else ""
+from helpers import honcho_helper  # noqa: E402
 
 
 class HonchoSync(Extension):
-    """Sync each history message to Honcho."""
 
-    async def execute(self, **kwargs) -> None:
-        """Push the incoming message to Honcho."""
+    async def execute(self, **kwargs):
+        """Sync message to Honcho Cloud."""
         context: AgentContext = self.agent.context
 
-        content_data = kwargs.get("content_data", {})
-        ai: bool = kwargs.get("ai", False)
-        content = _extract_content(content_data).strip()
+        content_data = kwargs.get('content_data', {})
+        ai = kwargs.get('ai', False)
 
-        if not content:
+        # Recursive content extraction
+        raw_content = content_data
+        while isinstance(raw_content, dict):
+            extracted = (
+                raw_content.get('content')
+                or raw_content.get('text')
+                or raw_content.get('message')
+            )
+            if extracted is None:
+                raw_content = str(raw_content)
+                break
+            raw_content = extracted
+
+        content = raw_content if isinstance(raw_content, str) else str(raw_content) if raw_content else ''
+        role = 'assistant' if ai else 'user'
+
+        if not content or not content.strip():
             return
 
-        role = "assistant" if ai else "user"
-
-        helper = _get_helper()
-        if helper is None:
+        if not honcho_helper.is_configured(context):
             return
 
         try:
-            success = helper.sync_message(context, role, content)
-            if success:
-                log.debug("Synced %s message (%d chars)", role, len(content))
-            else:
-                log.debug("sync_message returned False for %s", role)
-        except Exception as exc:
-            log.warning("Honcho sync error (non-fatal): %s", exc)
+            success = honcho_helper.sync_message(context, role, content)
+            if not success:
+                honcho_helper._log(context, "sync_message returned False", "error")
+        except Exception as e:
+            honcho_helper._log(context, f"Sync error: {e}", "error")
