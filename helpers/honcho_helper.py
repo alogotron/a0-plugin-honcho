@@ -216,7 +216,8 @@ def get_user_context(context, max_tokens: int = 500) -> Optional[str]:
 
     try:
         session = client.session(session_id)
-        ctx = session.context()
+        user_id = get_user_id(context)
+        ctx = session.context(peer_target=user_id, tokens=max_tokens)
         result = None
         if hasattr(ctx, 'summary') and ctx.summary:
             result = ctx.summary
