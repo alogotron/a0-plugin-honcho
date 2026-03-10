@@ -5,7 +5,7 @@
 
 <body>
     <div x-data>
-        <template x-if="$store.pluginSettings.settings">
+        <template x-if="config">
             <div>
                 <div class="section-title">Honcho Conversational Memory</div>
                 <div class="section-description">
@@ -24,7 +24,7 @@
                     </div>
                     <div class="field-control">
                         <input type="text"
-                               x-model="$store.pluginSettings.settings.honcho_workspace_id"
+                               x-model="config.honcho_workspace_id"
                                placeholder="agent-zero" />
                     </div>
                 </div>
@@ -38,7 +38,7 @@
                     </div>
                     <div class="field-control">
                         <input type="text"
-                               x-model="$store.pluginSettings.settings.honcho_user_id"
+                               x-model="config.honcho_user_id"
                                placeholder="user" />
                     </div>
                 </div>
@@ -52,7 +52,7 @@
                     </div>
                     <div class="field-control">
                         <input type="text"
-                               x-model="$store.pluginSettings.settings.honcho_agent_peer_id"
+                               x-model="config.honcho_agent_peer_id"
                                placeholder="agent-zero" />
                     </div>
                 </div>
@@ -66,7 +66,7 @@
                     </div>
                     <div class="field-control">
                         <input type="number"
-                               x-model.number="$store.pluginSettings.settings.honcho_cache_ttl"
+                               x-model.number="config.honcho_cache_ttl"
                                placeholder="120" />
                     </div>
                 </div>
@@ -80,7 +80,7 @@
                     </div>
                     <div class="field-control">
                         <input type="number"
-                               x-model.number="$store.pluginSettings.settings.honcho_max_context_tokens"
+                               x-model.number="config.honcho_max_context_tokens"
                                placeholder="500" />
                     </div>
                 </div>
@@ -95,7 +95,7 @@
                     <div class="field-control">
                         <label class="toggle">
                             <input type="checkbox"
-                                   x-model="$store.pluginSettings.settings.honcho_debug" />
+                                   x-model="config.honcho_debug" />
                             <span class="toggler"></span>
                         </label>
                     </div>
