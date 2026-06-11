@@ -1,8 +1,25 @@
-# Honcho plugin configuration defaults
-# API key is stored in secrets (HONCHO_API_KEY), not here
+# Honcho Plugin — Default Configuration
+#
+# These values are used when no per-project config.yaml is present.
+# Override any field in your project's .a0proj/plugins/honcho/config.yaml
+
+# Project workspace — memories scoped to the current project
+# Named profiles: auto-derived peer_id from profile name (e.g. 'wonder1')
 honcho_workspace_id: "agent-zero"
+
+# Global accumulator workspace — cross-project identity and long-term memory
+# Set to a fixed name like "wonder1-global" so memories persist across all projects
+# Leave empty to disable cross-project accumulation
+honcho_global_workspace_id: ""
+
+# User peer: who the agent is serving
 honcho_user_id: "user"
-honcho_agent_peer_id: "agent-zero"
+
+# Cache TTL in seconds for Honcho context
 honcho_cache_ttl: 120
+
+# Maximum tokens to inject from Honcho memory into the system prompt
 honcho_max_context_tokens: 500
+
+# Debug logging for Honcho operations
 honcho_debug: false

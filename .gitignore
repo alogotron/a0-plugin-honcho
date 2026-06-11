@@ -1,10 +1,24 @@
-__pycache__/
-*.pyc
-*.pyo
-.toggle-0
-.toggle-1
+# Secrets — never commit
+secrets.env
+*.env
+.env*
+**/secrets.*
+
+# Node
+**/node_modules/
+**/.npm/
+
+# Python
+**/__pycache__/
+**/*.pyc
 *.egg-info/
 dist/
 build/
-.env
-secrets.env
+.venv/
+venv/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

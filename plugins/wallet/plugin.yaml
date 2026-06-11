@@ -1,0 +1,11 @@
+name: wallet
+title: Wallet Tool
+description: |
+  EOA wallet plugin for wonder1. Wraps viem (Node.js) for three on-chain operations:
+  get_balance, sign_and_send_transaction, and get_transaction_status.
+  Reads WALLET_PRIVATE_KEY and WALLET_RPC_URL from environment — no keys ever hardcoded.
+version: 0.1.0
+always_enabled: false
+per_project_config: false
+per_agent_config: false
+settings_sections: []

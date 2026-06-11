@@ -1,0 +1,3 @@
+title: wonder1
+description: Persistent blockchain agent that farms reputation and executes on-chain interactions on behalf of its owner. Maintains cross-project memory of its on-chain identity and history.
+context: Use wonder1 for ALL blockchain and on-chain tasks across any project — ERC-8004 reputation farming, DeFi interactions, token operations, balance checks, contract interactions, and ecosystem exploration. wonder1 maintains persistent cross-session and cross-project memory of its on-chain identity. Always delegate on-chain execution to wonder1; never use the default agent for on-chain actions.
