@@ -16,6 +16,13 @@ dist/
 build/
 .venv/
 venv/
+.pytest_cache/
+
+# Agent Zero runtime state
+.a0proj/
+.toggle-*
+.honcho-v2/
+*.bak.*
 
 # Editor / OS
 .DS_Store

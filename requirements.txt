@@ -1,1 +1,1 @@
-honcho-ai>=2.0.0
+honcho-ai>=2.1.2,<3

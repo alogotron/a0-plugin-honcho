@@ -2,6 +2,13 @@
 #
 # These values are used when no per-project config.yaml is present.
 # Override any field in your project's .a0proj/plugins/honcho/config.yaml
+# Credentials and HONCHO_* environment/secret values override these settings.
+
+# Endpoints — hosted defaults; point these at a self-hosted deployment as needed.
+# HONCHO_API_URL (or legacy HONCHO_BASE_URL) overrides honcho_api_url.
+# HONCHO_MCP_URL overrides honcho_mcp_url.
+honcho_api_url: "https://api.honcho.dev"
+honcho_mcp_url: "https://mcp.honcho.dev"
 
 # Project workspace — memories scoped to the current project
 # Named profiles: auto-derived peer_id from profile name (e.g. 'wonder1')
@@ -23,3 +30,32 @@ honcho_max_context_tokens: 500
 
 # Debug logging for Honcho operations
 honcho_debug: false
+
+# Capture writes only already-redacted user/final-assistant text to SQLite.
+honcho_capture_enabled: true
+honcho_capture_user: true
+honcho_capture_assistant: true
+honcho_outbox_path: "/a0/usr/honcho/outbox.sqlite3"
+honcho_outbox_max_rows: 10000
+honcho_outbox_max_content_chars: 10000
+honcho_delivered_retention_seconds: 86400
+honcho_dead_retention_seconds: 2592000
+
+# One process-local worker per outbox; SQLite leases coordinate multiple processes.
+honcho_worker_poll_seconds: 1
+honcho_worker_batch_size: 20
+honcho_worker_concurrency: 2
+honcho_worker_lease_seconds: 30
+honcho_worker_max_attempts: 8
+honcho_retry_base_seconds: 2
+honcho_retry_max_seconds: 300
+honcho_retry_jitter_ratio: 0.2
+honcho_auth_circuit_seconds: 900
+honcho_sync_timeout_seconds: 10
+
+# Adaptive recall uses Session.context; it never invokes dialectic chat automatically.
+honcho_recall_enabled: true
+honcho_recall_search_top_k: 8
+honcho_recall_max_distance: 0.8
+honcho_recall_max_conclusions: 20
+honcho_context_cache_max_entries: 256

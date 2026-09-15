@@ -1,0 +1,94 @@
+<script type="module">
+  import { store } from "/plugins/honcho/webui/honcho-panel-store.js";
+</script>
+
+<div x-data x-move-before="#right-panel" id="honcho-root">
+  <template x-if="$store.honcho">
+    <aside id="honcho-panel"
+           :class="{ collapsed: $store.honcho.collapsed }"
+           :style="$store.honcho.collapsed ? '' : `width:${$store.honcho.width}px`"
+           x-init="$store.honcho.onMount($watch)"
+           x-destroy="$store.honcho.cleanup()">
+      <button type="button" class="hc-rail" x-show="$store.honcho.collapsed"
+              @click="$store.honcho.collapsed = false" title="Show Honcho Memory Hub">
+        <x-icon aria-hidden="true" name="neurology"></x-icon>
+        <span class="hc-dot" :class="$store.honcho.statusClass"></span>
+      </button>
+
+      <div class="hc-inner" x-show="!$store.honcho.collapsed">
+        <header class="hc-header">
+          <strong><x-icon aria-hidden="true" name="neurology"></x-icon> Honcho Memory Hub</strong>
+          <div>
+            <button type="button" @click="$store.honcho.refresh()" title="Refresh"><x-icon aria-hidden="true" name="refresh"></x-icon></button>
+            <button type="button" @click="$store.honcho.collapsed = true" title="Collapse"><x-icon aria-hidden="true" name="left_panel_close"></x-icon></button>
+          </div>
+        </header>
+
+        <div class="hc-body">
+          <div class="hc-status" :class="$store.honcho.statusClass">
+            <span class="hc-dot"></span><span x-text="$store.honcho.statusLabel"></span>
+          </div>
+          <template x-if="$store.honcho.data">
+            <div>
+              <section class="hc-card">
+                <small>ACTIVE IDENTITY</small>
+                <b x-text="$store.honcho.data.agent_peer_id || '—'"></b>
+                <span>user: <code x-text="$store.honcho.data.user_peer_id || '—'"></code></span>
+                <span>workspace: <code x-text="$store.honcho.data.workspace_id || '—'"></code></span>
+                <span>session: <code x-text="$store.honcho.data.session_id || 'no chat selected'"></code></span>
+              </section>
+
+              <section class="hc-card">
+                <small>DURABLE OUTBOX</small>
+                <dl class="hc-grid">
+                  <dt>Pending</dt><dd x-text="$store.honcho.counts.pending ?? 0"></dd>
+                  <dt>In flight</dt><dd x-text="$store.honcho.worker.in_flight ?? 0"></dd>
+                  <dt>Delivered</dt><dd x-text="$store.honcho.counts.delivered ?? 0"></dd>
+                  <dt>Dead</dt><dd x-text="$store.honcho.counts.dead ?? 0"></dd>
+                  <dt>Oldest active</dt><dd x-text="$store.honcho.data.outbox?.timing?.oldest_active_age_seconds == null ? '—' : `${$store.honcho.data.outbox.timing.oldest_active_age_seconds}s`"></dd>
+                  <dt>Last success</dt><dd x-text="$store.honcho.worker.last_success_at || '—'"></dd>
+                  <dt>Last error</dt><dd x-text="$store.honcho.worker.last_error_code || '—'"></dd>
+                  <dt>Latency</dt><dd x-text="$store.honcho.worker.last_latency_ms == null ? '—' : `${$store.honcho.worker.last_latency_ms}ms`"></dd>
+                </dl>
+              </section>
+
+              <dl class="hc-grid hc-runtime">
+                <dt>API mode</dt><dd x-text="$store.honcho.data.mode"></dd>
+                <dt>API endpoint</dt><dd x-text="$store.honcho.data.api_url"></dd>
+                <dt>MCP mode</dt><dd x-text="$store.honcho.data.mcp_mode"></dd>
+                <dt>MCP endpoint</dt><dd x-text="$store.honcho.data.mcp_url"></dd>
+                <dt>Capture</dt><dd x-text="$store.honcho.data.capture_enabled ? 'enabled' : 'disabled'"></dd>
+                <dt>Recall</dt><dd x-text="$store.honcho.data.recall_enabled ? 'enabled' : 'disabled'"></dd>
+                <dt>Worker</dt><dd x-text="$store.honcho.worker.running ? 'running' : 'stopped'"></dd>
+                <dt>Context cache</dt><dd x-text="$store.honcho.data.cache?.contexts ?? 0"></dd>
+              </dl>
+
+              <template x-if="$store.honcho.data.checks">
+                <section class="hc-checks">
+                  <div :class="$store.honcho.data.checks.api.ok ? 'ok' : 'bad'">API · <span x-text="$store.honcho.data.checks.api.detail"></span></div>
+                  <div :class="$store.honcho.data.checks.mcp.ok ? 'ok' : 'bad'">MCP · <span x-text="$store.honcho.data.checks.mcp.detail"></span></div>
+                </section>
+              </template>
+
+              <div class="hc-actions">
+                <button type="button" @click="$store.honcho.ping()" :disabled="$store.honcho.busy">Test API + MCP</button>
+                <button type="button" @click="$store.honcho.wake()" :disabled="$store.honcho.busy">Wake worker</button>
+                <button type="button" @click="$store.honcho.drain()" :disabled="$store.honcho.busy">Drain 5s</button>
+                <button type="button" @click="$store.honcho.retryDeadLetters()" :disabled="$store.honcho.busy || !($store.honcho.counts.dead > 0)">Retry dead</button>
+                <button type="button" @click="$store.honcho.clearCache()" :disabled="$store.honcho.busy">Clear cache</button>
+              </div>
+              <small class="hc-note" x-text="$store.honcho.data.config_scope?.detail"></small>
+            </div>
+          </template>
+        </div>
+        <div class="hc-resizer" @mousedown="$store.honcho.startResize($event)"></div>
+      </div>
+    </aside>
+  </template>
+</div>
+
+<style>
+#honcho-panel{position:relative;display:flex;height:100%;flex:0 0 auto;overflow:hidden;background:var(--color-panel,#1e1e1e);border-right:1px solid var(--color-border,#333)}
+#honcho-panel.collapsed{width:40px;flex-basis:40px}.hc-rail{position:relative;width:40px;height:100%;padding-top:12px;border:0;background:transparent;color:var(--color-text,#ddd);cursor:pointer}.hc-rail x-icon{font-size:1.2rem}.hc-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#777}.hc-rail .hc-dot{position:absolute;top:9px;right:7px}.hc-dot.live,.hc-status.live .hc-dot{background:#3fb950}.hc-dot.warn,.hc-status.warn .hc-dot{background:#d29922}.hc-dot.down,.hc-status.down .hc-dot{background:#f85149}.hc-inner{display:flex;flex-direction:column;width:100%;min-width:0}.hc-header{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--color-border,#333)}.hc-header strong{display:flex;align-items:center;gap:6px;font-size:.78rem}.hc-header button{border:0;background:transparent;color:var(--color-text-secondary,#999);cursor:pointer}.hc-body{overflow:auto;padding:10px;font-size:.76rem}.hc-status{display:flex;align-items:center;gap:7px;margin-bottom:10px;padding:7px;border-radius:6px;background:rgba(255,255,255,.04)}.hc-card{display:flex;flex-direction:column;gap:3px;margin-bottom:10px;padding:10px;border:1px solid var(--color-border,#333);border-radius:8px}.hc-card small,.hc-note{color:var(--color-text-secondary,#999)}.hc-card b{font-size:1rem}.hc-grid{display:grid;grid-template-columns:minmax(76px,.8fr) minmax(0,1.2fr);gap:5px 8px;margin:0}.hc-grid dt{color:var(--color-text-secondary,#999)}.hc-grid dd{margin:0;overflow-wrap:anywhere}.hc-runtime{margin-bottom:10px}.hc-checks{display:flex;flex-direction:column;gap:5px;margin:10px 0}.hc-checks .ok{color:#3fb950}.hc-checks .bad{color:#f85149}.hc-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:10px 0}.hc-actions button{padding:6px;border:1px solid var(--color-border,#444);border-radius:5px;background:rgba(255,255,255,.05);color:var(--color-text,#ddd);cursor:pointer}.hc-actions button:disabled{opacity:.45;cursor:not-allowed}.hc-resizer{position:absolute;top:0;right:0;width:4px;height:100%;cursor:ew-resize}
+@media(max-width:800px){#honcho-panel:not(.collapsed){position:absolute;z-index:20;max-width:88vw}.hc-actions{grid-template-columns:1fr}}
+</style>

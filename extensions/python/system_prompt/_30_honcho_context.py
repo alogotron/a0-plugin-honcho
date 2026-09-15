@@ -1,39 +1,52 @@
-"""
-Honcho Context Injection Extension
-Injects user context from Honcho into the system prompt.
-"""
+"""Inject adaptive, token-bounded Honcho context into primary user chats."""
 
-from agent import AgentContext
+from __future__ import annotations
+
+import asyncio
+
+from agent import AgentContextType
 from helpers.extension import Extension
 from usr.plugins.honcho.helpers import honcho_helper
 
 
 class HonchoContext(Extension):
-
-    def execute(self, system_prompt: list[str] = [], **kwargs):
-        """Add Honcho user context to system prompt."""
-        context: AgentContext = self.agent.context
-
-        # Guard: context.agent0 may not be assigned yet during init
-        if not hasattr(context, "agent0"):
+    async def execute(self, system_prompt: list[str], **kwargs):
+        agent = self.agent
+        if not agent:
             return
-
-        try:
-            max_tokens = 500
-            agent0 = getattr(context, "agent0", None)
-            if agent0:
-                config = honcho_helper._get_plugin_config(agent0)
-                max_tokens = config.get("honcho_max_context_tokens", 500)
-
-            user_context = honcho_helper.get_user_context(
-                context, max_tokens=max_tokens
+        context = agent.context
+        if (
+            context.type != AgentContextType.USER
+            or getattr(context, "agent0", None) is not agent
+        ):
+            return
+        loop_data = kwargs.get("loop_data")
+        search_query = honcho_helper.get_current_search_query(context)
+        if not search_query:
+            user_message = getattr(loop_data, "user_message", None)
+            search_query = honcho_helper.normalize_capture_content(
+                getattr(user_message, "content", user_message)
             )
-
+        try:
+            effective = honcho_helper.get_effective_config(context)
+            user_context = await asyncio.to_thread(
+                honcho_helper.get_user_context,
+                context,
+                effective.max_context_tokens,
+                search_query=search_query,
+            )
             if user_context and user_context.strip():
-                prompt = self.agent.read_prompt(
-                    "honcho.context.md",
-                    user_context=user_context,
+                system_prompt.append(
+                    agent.read_prompt(
+                        "honcho.context.md",
+                        user_context=user_context,
+                    )
                 )
-                system_prompt.append(prompt)
-        except Exception as e:
-            honcho_helper._log(context, f"Context error (non-fatal): {e}", "error")
+        except Exception as exc:
+            effective = honcho_helper.get_effective_config(context)
+            honcho_helper._log(
+                context,
+                "Context error (non-fatal): "
+                + honcho_helper.redact_text(type(exc).__name__, effective),
+                "error",
+            )

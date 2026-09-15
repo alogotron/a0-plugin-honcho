@@ -1,39 +1,30 @@
-"""
-Honcho Initialization Extension
-Initializes Honcho client when agent starts.
-"""
+"""Initialize the local durable Honcho runtime for an agent."""
 
-from agent import AgentContext
+from agent import AgentContextType
 from helpers.extension import Extension
 from usr.plugins.honcho.helpers import honcho_helper
 
 
 class HonchoInit(Extension):
-
     def execute(self, **kwargs):
-        """Initialize Honcho integration for this agent context."""
-        context: AgentContext = self.agent.context
-
-        # Guard: context.agent0 may not be assigned yet during init
-        if not hasattr(context, "agent0"):
+        del kwargs
+        agent = self.agent
+        if not agent:
             return
-
+        context = agent.context
+        # AgentContext assigns ``agent0`` only after Agent(0) finishes
+        # construction, while this extension runs from inside that constructor.
+        if getattr(agent, "number", None) != 0 or context.type != AgentContextType.USER:
+            return
         try:
-            if not honcho_helper.is_configured(context):
-                return  # Not configured, skip silently
-
-            client = honcho_helper.get_client(context)
-            if client:
-                session_id = honcho_helper.get_session_id(context)
-                honcho_helper._log(
-                    context,
-                    f"Integration enabled for session: {session_id}",
-                    "util",
-                )
-
-                if not hasattr(context, "_honcho"):
-                    context._honcho = {}
-                context._honcho["enabled"] = True
-                context._honcho["session_id"] = session_id
-        except Exception as e:
-            honcho_helper._log(context, f"Init error: {e}", "error")
+            # Local schema initialization and daemon startup only. Remote session
+            # creation is deferred to the worker or an explicit recall operation.
+            honcho_helper.initialize_runtime(context, start_worker=True)
+        except Exception as exc:
+            effective = honcho_helper.get_effective_config(context)
+            honcho_helper._log(
+                context,
+                "Runtime initialization failed: "
+                + honcho_helper.redact_text(type(exc).__name__, effective),
+                "error",
+            )

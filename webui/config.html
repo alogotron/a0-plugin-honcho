@@ -1,113 +1,48 @@
 <html>
 <head>
-    <title>Honcho</title>
+  <title>Honcho Memory Hub</title>
+  <script type="module">
+    import { store } from "/components/plugins/plugin-settings-store.js";
+  </script>
 </head>
-
 <body>
-    <div x-data>
-        <template x-if="config">
-            <div>
-                <div class="section-title">Honcho Conversational Memory</div>
-                <div class="section-description">
-                    Persistent user context across chat sessions via
-                    <a href="https://honcho.dev" target="_blank">Honcho Cloud</a>
-                    by Plastic Labs. Requires a free API key.
-                </div>
+<div x-data>
+  <template x-if="config">
+    <div>
+      <div class="section-title">Honcho Memory Hub</div>
+      <div class="section-description">The plugin uses the Honcho API for reliable Agent Zero memory. The MCP URL is a separate interoperability endpoint for external MCP clients and health checks.</div>
 
-                <div class="field">
-                    <div class="field-label">
-                        <div class="field-title">Workspace ID</div>
-                        <div class="field-description">
-                            Honcho workspace name. Can also be overridden via
-                            the <code>HONCHO_WORKSPACE_ID</code> secret.
-                        </div>
-                    </div>
-                    <div class="field-control">
-                        <input type="text"
-                               x-model="config.honcho_workspace_id"
-                               placeholder="agent-zero" />
-                    </div>
-                </div>
+      <div class="field"><div class="field-label"><div class="field-title">Honcho API URL</div><div class="field-description">SDK endpoint. HONCHO_API_URL, then legacy HONCHO_BASE_URL, overrides this value.</div></div><div class="field-control"><input type="url" x-model="config.honcho_api_url" placeholder="https://api.honcho.dev"></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">Honcho MCP URL</div><div class="field-description">Separate MCP endpoint. HONCHO_MCP_URL overrides this value.</div></div><div class="field-control"><input type="url" x-model="config.honcho_mcp_url" placeholder="https://mcp.honcho.dev"></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">Workspace ID</div><div class="field-description">Stable shared memory namespace. HONCHO_WORKSPACE_ID overrides it.</div></div><div class="field-control"><input type="text" x-model="config.honcho_workspace_id" placeholder="agent-zero"></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">Shared workspace override</div><div class="field-description">Optional compatibility override below secret/environment values.</div></div><div class="field-control"><input type="text" x-model="config.honcho_global_workspace_id"></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">User peer ID</div><div class="field-description">Stable human identity. HONCHO_USER_ID overrides it.</div></div><div class="field-control"><input type="text" x-model="config.honcho_user_id" placeholder="user"></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">Agent peer ID</div><div class="field-description">Kept exactly as configured. HONCHO_AGENT_PEER_ID has highest priority.</div></div><div class="field-control"><input type="text" x-model="config.honcho_agent_peer_id" placeholder="agent-zero"></div></div>
 
-                <div class="field">
-                    <div class="field-label">
-                        <div class="field-title">User Peer ID</div>
-                        <div class="field-description">
-                            Identifier for the human peer in Honcho.
-                        </div>
-                    </div>
-                    <div class="field-control">
-                        <input type="text"
-                               x-model="config.honcho_user_id"
-                               placeholder="user" />
-                    </div>
-                </div>
+      <div class="section-title">Capture and delivery</div>
+      <div class="field"><div class="field-label"><div class="field-title">Automatic capture</div><div class="field-description">Queue primary user messages and final responses after fail-closed redaction.</div></div><div class="field-control"><label class="toggle"><input type="checkbox" x-model="config.honcho_capture_enabled"><span class="toggler"></span></label></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">Capture user messages</div></div><div class="field-control"><label class="toggle"><input type="checkbox" x-model="config.honcho_capture_user"><span class="toggler"></span></label></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">Capture final responses</div></div><div class="field-control"><label class="toggle"><input type="checkbox" x-model="config.honcho_capture_assistant"><span class="toggler"></span></label></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">Outbox path</div><div class="field-description">Absolute local SQLite path. HONCHO_OUTBOX_PATH overrides it.</div></div><div class="field-control"><input type="text" x-model="config.honcho_outbox_path" placeholder="/a0/usr/honcho/outbox.sqlite3"></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">Maximum queued rows</div></div><div class="field-control"><input type="number" min="1" max="1000000" x-model.number="config.honcho_outbox_max_rows"></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">Maximum message characters</div></div><div class="field-control"><input type="number" min="1" max="100000" x-model.number="config.honcho_outbox_max_content_chars"></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">Worker batch size</div></div><div class="field-control"><input type="number" min="1" max="100" x-model.number="config.honcho_worker_batch_size"></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">Worker concurrency</div></div><div class="field-control"><input type="number" min="1" max="16" x-model.number="config.honcho_worker_concurrency"></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">Maximum delivery attempts</div></div><div class="field-control"><input type="number" min="1" max="100" x-model.number="config.honcho_worker_max_attempts"></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">SDK timeout (seconds)</div></div><div class="field-control"><input type="number" min="1" max="120" x-model.number="config.honcho_sync_timeout_seconds"></div></div>
 
-                <div class="field">
-                    <div class="field-label">
-                        <div class="field-title">Agent Peer ID</div>
-                        <div class="field-description">
-                            Identifier for the AI agent peer in Honcho.
-                        </div>
-                    </div>
-                    <div class="field-control">
-                        <input type="text"
-                               x-model="config.honcho_agent_peer_id"
-                               placeholder="agent-zero" />
-                    </div>
-                </div>
+      <div class="section-title">Adaptive recall</div>
+      <div class="field"><div class="field-label"><div class="field-title">Automatic recall</div><div class="field-description">Inject token-bounded session context and relevant conclusions. Dialectic chat is never automatic.</div></div><div class="field-control"><label class="toggle"><input type="checkbox" x-model="config.honcho_recall_enabled"><span class="toggler"></span></label></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">Context cache TTL (seconds)</div></div><div class="field-control"><input type="number" min="1" x-model.number="config.honcho_cache_ttl"></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">Maximum context tokens</div></div><div class="field-control"><input type="number" min="1" max="4000" x-model.number="config.honcho_max_context_tokens"></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">Semantic search top K</div></div><div class="field-control"><input type="number" min="1" max="100" x-model.number="config.honcho_recall_search_top_k"></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">Maximum semantic distance</div></div><div class="field-control"><input type="number" min="0" max="1" step="0.05" x-model.number="config.honcho_recall_max_distance"></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">Maximum conclusions</div></div><div class="field-control"><input type="number" min="1" max="100" x-model.number="config.honcho_recall_max_conclusions"></div></div>
+      <div class="field"><div class="field-label"><div class="field-title">Debug logging</div></div><div class="field-control"><label class="toggle"><input type="checkbox" x-model="config.honcho_debug"><span class="toggler"></span></label></div></div>
 
-                <div class="field">
-                    <div class="field-label">
-                        <div class="field-title">Context Cache TTL (seconds)</div>
-                        <div class="field-description">
-                            How long to cache Honcho user context before refreshing.
-                        </div>
-                    </div>
-                    <div class="field-control">
-                        <input type="number"
-                               x-model.number="config.honcho_cache_ttl"
-                               placeholder="120" />
-                    </div>
-                </div>
-
-                <div class="field">
-                    <div class="field-label">
-                        <div class="field-title">Max Context Tokens</div>
-                        <div class="field-description">
-                            Maximum tokens for the injected user context.
-                        </div>
-                    </div>
-                    <div class="field-control">
-                        <input type="number"
-                               x-model.number="config.honcho_max_context_tokens"
-                               placeholder="500" />
-                    </div>
-                </div>
-
-                <div class="field">
-                    <div class="field-label">
-                        <div class="field-title">Debug Logging</div>
-                        <div class="field-description">
-                            Enable verbose logging for troubleshooting.
-                        </div>
-                    </div>
-                    <div class="field-control">
-                        <label class="toggle">
-                            <input type="checkbox"
-                                   x-model="config.honcho_debug" />
-                            <span class="toggler"></span>
-                        </label>
-                    </div>
-                </div>
-
-                <div class="section-description" style="margin-top: 1rem; opacity: 0.7;">
-                    <strong>Note:</strong> The <code>HONCHO_API_KEY</code> must be set in
-                    <strong>Settings &rarr; Secrets</strong>. Get a free key at
-                    <a href="https://app.honcho.dev" target="_blank">app.honcho.dev</a>.
-                </div>
-            </div>
-        </template>
+      <div class="section-description">Set HONCHO_API_KEY in Settings → Secrets for hosted Honcho. The plugin writes only its own Agent Zero conversations; external MCP clients should write only their own namespaced sessions.</div>
     </div>
+  </template>
+</div>
 </body>
 </html>
