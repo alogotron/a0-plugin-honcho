@@ -20,6 +20,9 @@ class HonchoInit(Extension):
             # Local schema initialization and daemon startup only. Remote session
             # creation is deferred to the worker or an explicit recall operation.
             honcho_helper.initialize_runtime(context, start_worker=True)
+            # Best-effort Honcho scope registration (SDK >= 2.4.0) happens on a
+            # daemon thread so agent startup is never blocked by remote I/O.
+            honcho_helper.register_session_scope_async(context)
         except Exception as exc:
             effective = honcho_helper.get_effective_config(context)
             honcho_helper._log(

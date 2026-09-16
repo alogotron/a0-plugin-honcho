@@ -36,6 +36,7 @@
                 <span>user: <code x-text="$store.honcho.data.user_peer_id || '—'"></code></span>
                 <span>workspace: <code x-text="$store.honcho.data.workspace_id || '—'"></code></span>
                 <span>session: <code x-text="$store.honcho.data.session_id || 'no chat selected'"></code></span>
+                <span>scope: <code x-text="$store.honcho.scopeLabel"></code></span>
               </section>
 
               <section class="hc-card">
@@ -57,6 +58,8 @@
                 <dt>API endpoint</dt><dd x-text="$store.honcho.data.api_url"></dd>
                 <dt>MCP mode</dt><dd x-text="$store.honcho.data.mcp_mode"></dd>
                 <dt>MCP endpoint</dt><dd x-text="$store.honcho.data.mcp_url"></dd>
+                <dt>Scope</dt><dd x-text="`${$store.honcho.scopeLabel} · ${$store.honcho.scope.strategy}`"></dd>
+                <dt>Scope SDK</dt><dd x-text="$store.honcho.scope.sdk_support ? 'supported' : 'not supported'"></dd>
                 <dt>Capture</dt><dd x-text="$store.honcho.data.capture_enabled ? 'enabled' : 'disabled'"></dd>
                 <dt>Recall</dt><dd x-text="$store.honcho.data.recall_enabled ? 'enabled' : 'disabled'"></dd>
                 <dt>Worker</dt><dd x-text="$store.honcho.worker.running ? 'running' : 'stopped'"></dd>
@@ -67,6 +70,9 @@
                 <section class="hc-checks">
                   <div :class="$store.honcho.data.checks.api.ok ? 'ok' : 'bad'">API · <span x-text="$store.honcho.data.checks.api.detail"></span></div>
                   <div :class="$store.honcho.data.checks.mcp.ok ? 'ok' : 'bad'">MCP · <span x-text="$store.honcho.data.checks.mcp.detail"></span></div>
+                  <template x-if="$store.honcho.data.checks.scope">
+                    <div :class="$store.honcho.data.checks.scope.ok ? 'ok' : 'bad'">Scope · <span x-text="$store.honcho.data.checks.scope.detail"></span></div>
+                  </template>
                 </section>
               </template>
 

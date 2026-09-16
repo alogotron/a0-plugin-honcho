@@ -34,6 +34,7 @@ class HonchoContext(Extension):
                 context,
                 effective.max_context_tokens,
                 search_query=search_query,
+                scope_id=honcho_helper.resolve_scope_id(effective, context),
             )
             if user_context and user_context.strip():
                 system_prompt.append(

@@ -15,6 +15,9 @@ _ACTIONS = {"recall", "search", "ask", "remember", "forget", "status", "dream"}
 _SCOPES = {"peer", "session", "workspace"}
 _REASONING_LEVELS = {"minimal", "low", "medium", "high", "max"}
 _CONCLUSION_ID = re.compile(r"^[A-Za-z0-9._:-]{1,256}$")
+_SCOPE_UNSUPPORTED = (
+    "Honcho scopes require honcho-ai>=2.4.0; the installed SDK does not support them."
+)
 
 
 class HonchoMemory(Tool):
@@ -23,7 +26,7 @@ class HonchoMemory(Tool):
         action: str = "",
         query: str = "",
         text: str = "",
-        scope: str = "peer",
+        scope: str = "",
         limit: int = 5,
         conclusion_id: str = "",
         confirm: bool = False,
@@ -51,6 +54,11 @@ class HonchoMemory(Tool):
                     "workspace_id": effective.workspace_id,
                     "user_peer_id": effective.user_peer_id,
                     "agent_peer_id": effective.agent_peer_id,
+                    "scope": {
+                        "strategy": getattr(effective, "scope_strategy", "off"),
+                        "resolved": hh.resolve_scope_id(effective, context),
+                        "sdk_support": hh.scope_supported(),
+                    },
                     "outbox": state,
                 }
                 return self._safe_response(
@@ -65,11 +73,13 @@ class HonchoMemory(Tool):
                     effective,
                     self._required(query, "query"),
                 )
+                _, scope_id = self._honcho_scope_arg(effective, scope)
                 result = await asyncio.to_thread(
                     hh.get_user_context,
                     context,
                     effective.max_context_tokens,
                     search_query=safe_query,
+                    scope_id=scope_id,
                 )
                 return self._safe_response(
                     context,
@@ -98,28 +108,38 @@ class HonchoMemory(Tool):
                     self._required(query, "query"),
                 )
                 bounded_limit = self._bounded_int(limit, default=5, minimum=1, maximum=20)
-                selected_scope = str(scope or "peer").strip().lower()
-                if selected_scope not in _SCOPES:
-                    raise ValueError("scope must be peer, session, or workspace")
-                if selected_scope == "peer":
+                domain, scope_id = self._honcho_scope_arg(
+                    effective, scope or "peer", allow_domains=True
+                )
+                if domain == "peer":
                     items = await asyncio.to_thread(
                         conclusions.query,
                         safe_query,
                         bounded_limit,
                         effective.recall_max_distance,
                     )
-                elif selected_scope == "session":
+                elif domain == "session":
                     items = await asyncio.to_thread(
                         client.session(session_id).search,
                         safe_query,
                         limit=bounded_limit,
                     )
-                else:
+                elif domain == "workspace":
                     items = await asyncio.to_thread(
                         client.search,
                         safe_query,
                         limit=bounded_limit,
                     )
+                else:
+                    try:
+                        items = await asyncio.to_thread(
+                            client.search,
+                            safe_query,
+                            scope=scope_id,
+                            limit=bounded_limit,
+                        )
+                    except TypeError:
+                        raise ValueError(_SCOPE_UNSUPPORTED) from None
                 return self._safe_response(
                     context,
                     effective,
@@ -137,12 +157,18 @@ class HonchoMemory(Tool):
                     raise ValueError(
                         "reasoning_level must be minimal, low, medium, high, or max"
                     )
-                answer = await asyncio.to_thread(
-                    observer.chat,
-                    safe_query,
+                chat_kwargs: dict[str, Any] = dict(
                     target=user,
                     session=session_id,
                     reasoning_level=level,
+                )
+                _, scope_id = self._honcho_scope_arg(effective, scope)
+                if scope_id:
+                    chat_kwargs["scope"] = scope_id
+                answer = await asyncio.to_thread(
+                    observer.chat,
+                    safe_query,
+                    **chat_kwargs,
                 )
                 return self._safe_response(
                     context,
@@ -209,6 +235,29 @@ class HonchoMemory(Tool):
                 effective,
                 f"Honcho {selected} failed: {hh.redact_text(type(exc).__name__, effective)}",
             )
+
+    @staticmethod
+    def _honcho_scope_arg(
+        effective: Any, raw: Any, *, allow_domains: bool = False
+    ) -> tuple[str, str | None]:
+        """Resolve the optional scope argument to (search domain, Honcho scope ID).
+
+        Plain names and 'a0-'-prefixed names are accepted; the configured prefix
+        rules apply. A scope name on an SDK without scope support is a bounded
+        error instead of a silent global fallback.
+        """
+        text = str(raw or "").strip()
+        if not text:
+            return ("", None)
+        lowered = text.lower()
+        if allow_domains and lowered in _SCOPES:
+            return (lowered, None)
+        scope_id = hh.resolve_scope_reference(text, effective)
+        if scope_id is None:
+            raise ValueError("scope must be peer, session, workspace, or a scope name")
+        if not hh.scope_supported():
+            raise ValueError(_SCOPE_UNSUPPORTED)
+        return ("", scope_id)
 
     @staticmethod
     def _required(value: Any, name: str) -> str:

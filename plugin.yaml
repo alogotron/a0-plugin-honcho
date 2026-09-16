@@ -3,7 +3,7 @@ title: Honcho Memory Hub
 description: >-
   Durable non-blocking conversational memory through the Honcho API, with
   adaptive recall and a separate Honcho MCP interoperability endpoint.
-version: 2.0.0-beta.1
+version: 2.0.0-beta.2
 settings_sections:
   - agent
 per_project_config: true

@@ -2,7 +2,7 @@
 
 Honcho Memory Hub gives Agent Zero reliable long-term conversational memory through hosted or self-hosted [Honcho](https://honcho.dev). It combines deterministic Agent Zero capture with Honcho's shared workspace model and MCP interoperability.
 
-Current version: **2.0.0-beta.1**.
+Current version: **2.0.0-beta.2**.
 
 ## What this alpha provides
 
@@ -11,6 +11,7 @@ Current version: **2.0.0-beta.1**.
 - **Adaptive recall:** query-aware, token-bounded session context includes relevant messages, summaries, the agent's representation/card of the user, and relevant conclusions. Honcho dialectic is never invoked automatically.
 - **Deliberate memory tool:** `honcho_memory` supports recall, search, ask, remember, forget, status, and dream operations.
 - **Hosted or self-hosted operation:** direct SDK/API traffic and MCP interoperability use separate configurable endpoints.
+- **Honcho scopes:** each Agent Zero project maps to scope `a0-<project-slug>` (configurable strategy/prefix, SDK >= 2.4.0); sessions are registered in the background and recall can be filtered per project. Scopes are visibility-only — peer representations stay unified — and the server backfills existing sessions retroactively.
 - **Operational UI:** the sidebar shows effective identity, queue state, worker health, cache state, and explicit API/MCP checks and queue actions.
 - **Privacy-first boundaries:** outbound text is fail-closed redacted, recalled memory is labeled as untrusted data, and status never returns credentials, queued content, credential digests, or the outbox path.
 
@@ -57,6 +58,9 @@ Set credentials under **Settings → Secrets**, then enable and configure Honcho
 | `HONCHO_CACHE_TTL` | Positive context-cache TTL override |
 | `HONCHO_MAX_CONTEXT_TOKENS` | Positive recall budget override |
 | `HONCHO_DEBUG` | Boolean debug override |
+| `HONCHO_SCOPE_STRATEGY` | Scope strategy override (`off`, `project`, `custom`) |
+| `HONCHO_SCOPE_PREFIX` | Scope prefix override (default `a0-`) |
+| `HONCHO_SCOPE_CUSTOM` | Custom scope name used with the `custom` strategy |
 
 Secret-manager and process-environment values override plugin settings. API URL precedence is `HONCHO_API_URL`, legacy `HONCHO_BASE_URL`, plugin setting, then the hosted default. MCP URL precedence is `HONCHO_MCP_URL`, plugin setting, then the hosted default. Explicit URLs are never overridden by a separate deployment-mode switch.
 
@@ -81,8 +85,21 @@ Secret-manager and process-environment values override plugin settings. API URL 
 | Max context tokens | `500` | Recall budget |
 | Search top K | `8` | Semantic candidates requested from Honcho |
 | Max conclusions | `20` | Bound on conclusion candidates |
+| Scope strategy | `project` | `project` maps each A0 project to a scope, `custom` uses one fixed name, `off` keeps the global view |
+| Scope prefix | `a0-` | Prepended to every resolved scope name |
+| Custom scope name | empty | Used only with the `custom` strategy |
 
 The settings page exposes additional retry, lease, retention, and relevance controls through `default_config.yaml`; invalid/out-of-range values fall back to bounded defaults.
+
+## Honcho scopes
+
+Honcho SDK 2.4.0 added scopes: server-side session groups used to filter visibility. With the default `project` strategy, the plugin resolves the active Agent Zero project to scope ID `a0-<project-slug>` (for example, project `honcho-v2` becomes `a0-honcho-v2`; names are lowercased and unsafe characters are replaced). On chat initialization the session is added to the resolved scope on a daemon thread — registration is get-or-create and idempotent, never blocks agent startup, and failures are logged but non-fatal.
+
+- **Visibility-only semantics:** scopes filter which sessions a recall or search sees; they do not fork memory. The peer representation stays unified across all scopes.
+- **Retroactive backfill:** when a session joins a scope, Honcho copies existing derived conclusions into the scope's visibility view; no re-derivation cost. `Scope.status()` reports backfill progress.
+- **Recall filtering:** automatic prompt-context recall and the `honcho_memory` tool pass the resolved scope to `Session.context`/`Peer.chat`; the context cache key includes the scope ID. Omit the tool's `scope` argument for the global view.
+- **Graceful fallback:** every scope call is feature-detected. With an SDK older than 2.4.0, registration is skipped and recall silently uses the global view; an explicit tool `scope` argument returns a clear bounded error instead of silently degrading.
+- **MCP clients:** external Honcho MCP clients can use scopes natively with the same scope IDs; automatic A0 capture still never routes through MCP.
 
 ## Runtime behavior
 
@@ -101,7 +118,7 @@ Delivery is **at least once** under an ambiguous remote-success/local-crash fail
 
 ### Recall path
 
-Before a primary-user model turn, the current redacted user intent becomes `search_query` for `Session.context`. Cache identity includes API URL, workspace, observer, target, session, token budget, and query digest. Concurrent identical recalls use a single-flight guard. Slow or failed refresh may reuse prior cached context.
+Before a primary-user model turn, the current redacted user intent becomes `search_query` for `Session.context`. When the SDK supports scopes (>= 2.4.0), the resolved scope is passed as `Session.context(scope=...)`; older SDKs silently use the global view. Cache identity includes API URL, workspace, observer, target, session, token budget, query digest, and the resolved scope ID. Concurrent identical recalls use a single-flight guard. Slow or failed refresh may reuse prior cached context.
 
 Automatic recall never calls Honcho dialectic. Use the deliberate tool's `ask` action when deeper reasoning is worth the latency.
 

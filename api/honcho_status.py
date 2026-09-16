@@ -68,6 +68,48 @@ def _bounded_int(value, default: int, minimum: int, maximum: int) -> int:
         return default
 
 
+def _scope_status(hh, context, effective) -> dict:
+    """Sanitized scope view: strategy, resolved ID, and SDK support flag."""
+    resolved = None
+    if hasattr(hh, "resolve_scope_id"):
+        try:
+            resolved = hh.resolve_scope_id(effective, context)
+        except Exception:
+            resolved = None
+    supported = False
+    if hasattr(hh, "scope_supported"):
+        try:
+            supported = bool(hh.scope_supported())
+        except Exception:
+            supported = False
+    return {
+        "strategy": str(getattr(effective, "scope_strategy", "off") or "off"),
+        "resolved": resolved,
+        "view": resolved or "global",
+        "sdk_support": supported,
+    }
+
+
+def _scope_probe(hh, effective, scope_id: str) -> dict:
+    """Optional cheap scope membership/backfill check; never raises or leaks."""
+    if not scope_id:
+        return {"ok": False, "detail": "No scope is resolved (global view)"}
+    try:
+        client = hh.get_probe_client(effective)
+        scope = client.scope(id=scope_id)
+        status = scope.status()
+        summary = hh.bounded_result(
+            {key: getattr(status, key) for key in vars(status) if not key.startswith("_")}
+            if hasattr(status, "__dict__")
+            else status,
+            effective,
+            limit=400,
+        )
+        return {"ok": True, "detail": f"Scope status: {summary}"}
+    except Exception as exc:
+        return {"ok": False, "detail": hh.redact_text(exc, effective)[:240]}
+
+
 class HonchoStatus(ApiHandler):
     async def process(self, input: dict, request: Request) -> dict | Response:
         del request
@@ -159,6 +201,7 @@ class HonchoStatus(ApiHandler):
             "capture_enabled": bool(getattr(effective, "capture_enabled", True)),
             "recall_enabled": bool(getattr(effective, "recall_enabled", True)),
             "session_id": hh.get_session_id(context) if context is not None else None,
+            "scope": _scope_status(hh, context, effective),
             "config_scope": {
                 "per_project": True,
                 "per_agent": False,
@@ -176,6 +219,11 @@ class HonchoStatus(ApiHandler):
                 asyncio.to_thread(_mcp_probe, hh, effective),
             )
             payload["checks"] = {"api": api_check, "mcp": mcp_check}
+            scope_view = payload["scope"]
+            if scope_view["resolved"] and scope_view["sdk_support"]:
+                payload["checks"]["scope"] = await asyncio.to_thread(
+                    _scope_probe, hh, effective, scope_view["resolved"]
+                )
             payload["ping"] = {
                 "reachable": bool(api_check["ok"] and mcp_check["ok"]),
                 "detail": f"API: {api_check['detail']} · MCP: {mcp_check['detail']}",

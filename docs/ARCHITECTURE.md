@@ -2,7 +2,7 @@
 
 ## Implemented scope
 
-Version `2.0.0-beta.1` is a hybrid memory integration:
+Version `2.0.0-beta.2` is a hybrid memory integration:
 
 - the Honcho Python SDK/API is the deterministic Agent Zero data plane;
 - a local SQLite WAL outbox removes remote writes from the response hot path;
@@ -67,9 +67,19 @@ session.context(
 
 The resulting memory pack can contain recent relevant messages, a session summary, the agent's representation/card of the user, and semantically relevant conclusions. It is bounded and injected inside an explicit untrusted-data prompt boundary.
 
-Cache identity includes endpoint, workspace, observer, target, session, token budget, and a query digest. A per-key single-flight guard avoids duplicate concurrent retrieval. Failed refreshes may return a prior cached value. This alpha uses bounded TTL/manual invalidation rather than a Honcho derivation-complete signal; asynchronous writes therefore do not immediately invalidate recall.
+Cache identity includes endpoint, workspace, observer, target, session, token budget, a query digest, and the resolved scope ID. A per-key single-flight guard avoids duplicate concurrent retrieval. Failed refreshes may return a prior cached value. This alpha uses bounded TTL/manual invalidation rather than a Honcho derivation-complete signal; asynchronous writes therefore do not immediately invalidate recall.
 
 Dialectic `chat` is never automatic. It is an explicit `honcho_memory` action.
+
+## Honcho scopes
+
+Honcho SDK 2.4.0 added scopes: server-side session groups that filter which sessions a context, search, or dialectic view sees. The plugin maps the active Agent Zero project to scope ID `<prefix>-<project-slug>` (default prefix `a0-`; project `honcho-v2` becomes `a0-honcho-v2`) under the `project` strategy, with `custom` and `off` alternatives. Scope IDs are slugified (lowercase, unsafe characters replaced, bounded length) and env overrides follow the standard precedence (`HONCHO_SCOPE_STRATEGY`, `HONCHO_SCOPE_PREFIX`, `HONCHO_SCOPE_CUSTOM`).
+
+- On chat initialization the session is added to the resolved scope on a daemon thread; registration is get-or-create and idempotent, tolerates already-member responses, and is non-fatal on failure. Agent startup never blocks on scope I/O.
+- Scopes are **visibility-only**: they do not fork the peer representation. Honcho retroactively backfills existing conclusions into the scope view; `Scope.status()` reports backfill progress.
+- Automatic recall and the deliberate tool pass the resolved scope to `Session.context(scope=...)` / `Peer.chat(scope=...)`; the context cache key includes the scope ID.
+- All scope use is feature-detected (`hasattr` checks). SDKs older than 2.4.0 skip registration and silently recall the global view; an explicit tool `scope` argument returns a bounded error instead.
+- External MCP clients can use the same scope IDs natively; automatic A0 capture still never routes through MCP.
 
 ## Deliberate tool
 

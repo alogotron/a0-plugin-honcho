@@ -53,6 +53,15 @@ honcho_retry_jitter_ratio: 0.2
 honcho_auth_circuit_seconds: 900
 honcho_sync_timeout_seconds: 10
 
+# Honcho scopes (require honcho-ai >= 2.4.0; older SDKs silently use the global view).
+# Strategy 'project' maps the active A0 project to scope '<prefix><project-slug>'
+# (e.g. project 'honcho-v2' -> scope 'a0-honcho-v2'). Strategy 'custom' maps to
+# '<prefix><slug of honcho_scope_custom>'. Strategy 'off' disables scopes.
+# HONCHO_SCOPE_STRATEGY / HONCHO_SCOPE_PREFIX / HONCHO_SCOPE_CUSTOM override these.
+honcho_scope_strategy: "project"
+honcho_scope_prefix: "a0-"
+honcho_scope_custom: ""
+
 # Adaptive recall uses Session.context; it never invokes dialectic chat automatically.
 honcho_recall_enabled: true
 honcho_recall_search_top_k: 8

@@ -29,6 +29,16 @@ const model = {
     return this.data?.outbox?.worker || {};
   },
 
+  get scope() {
+    return this.data?.scope || { view: "global", strategy: "off", resolved: null, sdk_support: false };
+  },
+
+  get scopeLabel() {
+    const scope = this.scope;
+    if (!scope.resolved) return "global";
+    return scope.sdk_support ? scope.resolved : `${scope.resolved} (unsupported SDK)`;
+  },
+
   get statusClass() {
     if (!this.data) return "warn";
     if (!this.data.configured) return "down";

@@ -66,7 +66,14 @@ _DEFAULTS: dict[str, Any] = {
     "honcho_recall_max_distance": 0.8,
     "honcho_recall_max_conclusions": 20,
     "honcho_context_cache_max_entries": 256,
+    "honcho_scope_strategy": "project",
+    "honcho_scope_prefix": "a0-",
+    "honcho_scope_custom": "",
 }
+
+SCOPE_STRATEGIES = {"off", "project", "custom"}
+_SCOPE_UNSAFE = re.compile(r"[^a-z0-9_-]+")
+_SCOPE_MAX_LENGTH = 64
 
 _client_cache: dict[tuple[str, str, str], Any] = {}
 _delivery_client_cache: dict[tuple[str, str, str, float], Any] = {}
@@ -76,6 +83,8 @@ _context_lock = threading.RLock()
 _outbox_cache: dict[tuple[Any, ...], Outbox] = {}
 _runtime_configs: dict[str, "EffectiveConfig"] = {}
 _ready_sessions: set[tuple[str, str, str]] = set()
+_scoped_sessions: set[tuple[str, str, str, str]] = set()
+_scope_inflight: set[tuple[str, str, str]] = set()
 _runtime_lock = threading.RLock()
 
 
@@ -113,6 +122,9 @@ class EffectiveConfig:
     recall_max_distance: float = 0.8
     recall_max_conclusions: int = 20
     context_cache_max_entries: int = 256
+    scope_strategy: str = "project"
+    scope_prefix: str = "a0-"
+    scope_custom: str = ""
 
     @property
     def mode(self) -> str:
@@ -357,7 +369,94 @@ def get_effective_config(
             256,
             maximum=4096,
         ),
+        scope_strategy=_normalize_scope_strategy(
+            override("HONCHO_SCOPE_STRATEGY") or explicit.get("honcho_scope_strategy")
+        ),
+        scope_prefix=normalize_scope_prefix(
+            override("HONCHO_SCOPE_PREFIX")
+            if override("HONCHO_SCOPE_PREFIX") is not None
+            else explicit.get("honcho_scope_prefix", _DEFAULTS["honcho_scope_prefix"])
+        ),
+        scope_custom=str(
+            override("HONCHO_SCOPE_CUSTOM") or explicit.get("honcho_scope_custom") or ""
+        ).strip()[:_SCOPE_MAX_LENGTH],
     )
+
+
+def _normalize_scope_strategy(value: Any) -> str:
+    strategy = str(value or "").strip().lower()
+    return strategy if strategy in SCOPE_STRATEGIES else _DEFAULTS["honcho_scope_strategy"]
+
+
+def slugify_scope_name(value: Any) -> str:
+    """Lowercase kebab-case slug safe for Honcho scope IDs ('' when unusable)."""
+    text = str(value or "").strip().lower()
+    text = _SCOPE_UNSAFE.sub("-", text)
+    text = re.sub(r"-{2,}", "-", text).strip("-_")
+    return text[:_SCOPE_MAX_LENGTH].strip("-_")
+
+
+def normalize_scope_prefix(value: Any) -> str:
+    """Sanitize the configured prefix; '' disables prefixing."""
+    return slugify_scope_name(value)
+
+
+def _active_project_name(context: Optional["AgentContext"]) -> str:
+    """Best-effort active A0 project name; '' when unavailable."""
+    if context is None:
+        return ""
+    try:
+        from helpers import projects
+
+        return str(projects.get_context_project_name(context) or "").strip()
+    except Exception:
+        pass
+    try:
+        get_data = getattr(context, "get_data", None)
+        if callable(get_data):
+            return str(get_data("project") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def resolve_scope_id(
+    effective: EffectiveConfig, context: Optional["AgentContext"] = None
+) -> Optional[str]:
+    """Resolve the configured scope strategy to a scope ID, or None for global."""
+    strategy = str(effective.scope_strategy or "").strip().lower()
+    if strategy == "project":
+        name = slugify_scope_name(_active_project_name(context))
+    elif strategy == "custom":
+        name = slugify_scope_name(effective.scope_custom)
+    else:
+        return None
+    if not name:
+        return None
+    prefix = normalize_scope_prefix(effective.scope_prefix)
+    return f"{prefix}-{name}" if prefix else name
+
+
+def resolve_scope_reference(value: Any, effective: EffectiveConfig) -> Optional[str]:
+    """Resolve a user-supplied scope name (plain or prefixed) to a scope ID."""
+    slug = slugify_scope_name(value)
+    if not slug:
+        return None
+    prefix = normalize_scope_prefix(effective.scope_prefix)
+    if prefix and not slug.startswith(f"{prefix}-") and slug != prefix:
+        return f"{prefix}-{slug}"
+    return slug
+
+
+def scope_supported(client: Any = None) -> bool:
+    """Feature-detect Honcho scope support (SDK >= 2.4.0) without network I/O."""
+    if not HONCHO_AVAILABLE:
+        return False
+    target = client if client is not None else Honcho
+    try:
+        return callable(getattr(target, "scope", None))
+    except Exception:
+        return False
 
 
 def destination_ready(effective: EffectiveConfig) -> bool:
@@ -488,7 +587,7 @@ def ensure_initialized(context: "AgentContext") -> bool:
     if not hasattr(context, "_honcho"):
         context._honcho = {}
     try:
-        _ensure_remote_session(client, effective, session_id)
+        _ensure_remote_session(client, effective, session_id, context=context)
         context._honcho.update(
             {"enabled": True, "session_id": session_id, "identity": identity}
         )
@@ -764,23 +863,111 @@ def _delivery_client(effective: EffectiveConfig) -> Any:
     return existing
 
 
-def _ensure_remote_session(client: Any, effective: EffectiveConfig, session_id: str) -> Any:
+def _ensure_remote_session(
+    client: Any, effective: EffectiveConfig, session_id: str, *, context: Any = None
+) -> Any:
     ready_key = (effective.routing_id, effective.key_digest, session_id)
     session = client.session(session_id)
     with _runtime_lock:
         ready = ready_key in _ready_sessions
-    if ready:
-        return session
-    try:
-        session.add_peers(_observation_roster(client, effective))
-    except Exception as exc:
-        if not _already_present(exc):
-            raise
-    with _runtime_lock:
-        _ready_sessions.add(ready_key)
-        while len(_ready_sessions) > 4096:
-            _ready_sessions.pop()
+    if not ready:
+        try:
+            session.add_peers(_observation_roster(client, effective))
+        except Exception as exc:
+            if not _already_present(exc):
+                raise
+        with _runtime_lock:
+            _ready_sessions.add(ready_key)
+            while len(_ready_sessions) > 4096:
+                _ready_sessions.pop()
+    _ensure_scope_membership(client, effective, session_id, context=context)
     return session
+
+
+def _ensure_scope_membership(
+    client: Any, effective: EffectiveConfig, session_id: str, *, context: Any = None
+) -> bool:
+    """Idempotently add the session to the resolved scope. Never fatal."""
+    scope_id = resolve_scope_id(effective, context)
+    if not scope_id or not scope_supported(client):
+        return False
+    scoped_key = (effective.routing_id, effective.key_digest, session_id, scope_id)
+    with _runtime_lock:
+        if scoped_key in _scoped_sessions:
+            return True
+    try:
+        scope = client.scope(
+            id=scope_id,
+            metadata={"source": "agent-zero", "a0_scope_strategy": effective.scope_strategy},
+        )
+        scope.add_sessions([session_id])
+    except Exception as exc:
+        if _already_present(exc):
+            with _runtime_lock:
+                _scoped_sessions.add(scoped_key)
+            return True
+        _log(
+            context,
+            f"Scope registration failed (non-fatal): {redact_text(type(exc).__name__, effective)}",
+            "error",
+        )
+        return False
+    with _runtime_lock:
+        _scoped_sessions.add(scoped_key)
+        while len(_scoped_sessions) > 4096:
+            _scoped_sessions.pop()
+    return True
+
+
+def register_session_scope(
+    context: "AgentContext", *, effective: Optional[EffectiveConfig] = None
+) -> bool:
+    """Best-effort synchronous scope registration for this chat's session."""
+    cfg = effective or get_effective_config(context)
+    if resolve_scope_id(cfg, context) is None:
+        return False
+    if not HONCHO_AVAILABLE or not destination_ready(cfg):
+        return False
+    client = get_client(context, config=cfg)
+    if client is None or not scope_supported(client):
+        return False
+    return _ensure_scope_membership(client, cfg, get_session_id(context), context=context)
+
+
+def register_session_scope_async(context: "AgentContext") -> bool:
+    """Fire-and-forget scope registration; never blocks agent startup."""
+    try:
+        effective = get_effective_config(context)
+        scope_id = resolve_scope_id(effective, context)
+        if not scope_id or not HONCHO_AVAILABLE or not destination_ready(effective):
+            return False
+        if not scope_supported():
+            return False
+        session_id = get_session_id(context)
+        inflight_key = (effective.routing_id, session_id, scope_id)
+        with _runtime_lock:
+            if inflight_key in _scope_inflight:
+                return False
+            _scope_inflight.add(inflight_key)
+
+        def _run() -> None:
+            try:
+                register_session_scope(context, effective=effective)
+            except Exception as exc:
+                _log(
+                    context,
+                    "Scope registration failed (non-fatal): "
+                    + redact_text(type(exc).__name__, effective),
+                    "error",
+                )
+            finally:
+                with _runtime_lock:
+                    _scope_inflight.discard(inflight_key)
+
+        threading.Thread(target=_run, name="honcho-scope-init", daemon=True).start()
+        return True
+    except Exception:
+        return False
 
 
 def deliver_outbox_batch(events: list[OutboxEvent]) -> None:
@@ -932,8 +1119,12 @@ def _context_text(value: Any, *, max_chars: int = 12000) -> Optional[str]:
 
 
 def context_cache_key(
-    effective: EffectiveConfig, session_id: str, max_tokens: int, search_query: str = ""
-) -> tuple[str, str, str, str, str, int, str]:
+    effective: EffectiveConfig,
+    session_id: str,
+    max_tokens: int,
+    search_query: str = "",
+    scope_id: Optional[str] = None,
+) -> tuple[str, str, str, str, str, int, str, str]:
     query_digest = hashlib.sha256(str(search_query or "").strip().encode("utf-8")).hexdigest()[:20]
     return (
         effective.api_url,
@@ -943,6 +1134,7 @@ def context_cache_key(
         session_id,
         max_tokens,
         query_digest,
+        str(scope_id or ""),
     )
 
 
@@ -951,6 +1143,7 @@ def get_user_context(
     max_tokens: Optional[int] = None,
     *,
     search_query: str = "",
+    scope_id: Optional[str] = None,
 ) -> Optional[str]:
     effective = get_effective_config(context)
     if not effective.recall_enabled or not ensure_initialized(context):
@@ -965,7 +1158,12 @@ def get_user_context(
     if raw_query and query is None:
         return None
     session_id = get_session_id(context)
-    key = context_cache_key(effective, session_id, budget, query or "")
+    requested_scope = (
+        resolve_scope_id(effective, context) if scope_id is None else slugify_scope_name(scope_id)
+    )
+    # Older SDKs (< 2.4.0) have no scope support: degrade to the global view.
+    active_scope = requested_scope if requested_scope and scope_supported() else None
+    key = context_cache_key(effective, session_id, budget, query or "", active_scope)
     now = time.monotonic()
     with _context_lock:
         cached = _context_cache.get(key)
@@ -987,7 +1185,7 @@ def get_user_context(
         client = get_client(context, config=effective)
         if client is None:
             return cached[1] if cached else None
-        result = client.session(session_id).context(
+        context_kwargs: dict[str, Any] = dict(
             summary=True,
             tokens=budget,
             peer_target=effective.user_peer_id,
@@ -999,6 +1197,9 @@ def get_user_context(
             include_most_frequent=True,
             max_conclusions=effective.recall_max_conclusions,
         )
+        if active_scope:
+            context_kwargs["scope"] = active_scope
+        result = client.session(session_id).context(**context_kwargs)
         text = _context_text(result, max_chars=max(1000, budget * 6))
         if text:
             text = _mask_outbound(context, text, effective)
@@ -1047,6 +1248,7 @@ def cache_status() -> dict[str, int]:
             "context_inflight": len(_context_inflight),
             "runtime_configs": len(_runtime_configs),
             "ready_sessions": len(_ready_sessions),
+            "scoped_sessions": len(_scoped_sessions),
         }
 
 
@@ -1060,6 +1262,8 @@ def cleanup(context: Optional["AgentContext"] = None) -> None:
         _delivery_client_cache.clear()
         _runtime_configs.clear()
         _ready_sessions.clear()
+        _scoped_sessions.clear()
+        _scope_inflight.clear()
         _outbox_cache.clear()
     stop_runtime(drain_seconds=0)
 

@@ -23,6 +23,15 @@ Implemented in `2.0.0-beta.1`:
 - advanced configuration/settings UI and an operational sidebar;
 - explicit single-writer and MCP interoperability contracts.
 
+## Stage 2.1 — Honcho scopes
+
+Implemented in `2.0.0-beta.2` (requires honcho-ai >= 2.4.0; feature-detected, graceful global fallback on older SDKs):
+
+- A0 project to Honcho scope mapping with a configurable `a0-` prefix (`project` strategy maps project `honcho-v2` to scope `a0-honcho-v2`; `custom` and `off` strategies available);
+- non-blocking, idempotent, failure-tolerant session-to-scope registration on chat initialization;
+- scope-filtered recall and deliberate tool operations with the scope ID in the context cache key;
+- sanitized scope status (strategy, resolved ID, SDK support flag, backfill status) in the API and sidebar.
+
 ## Stage 3 — production hardening candidates
 
 These remain future work and require separate approval:

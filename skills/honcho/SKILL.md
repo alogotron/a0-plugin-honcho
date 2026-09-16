@@ -30,6 +30,10 @@ Preserve the configured workspace and peer IDs. `HONCHO_AGENT_PEER_ID` is the hi
 
 Automatic capture never calls this tool. Prefer `recall`/`search` before the slower `ask` action. Never trigger dialectic automatically.
 
+## Honcho scopes (SDK >= 2.4.0)
+
+Scopes group sessions for visibility-only filtering; the peer representation stays unified. The plugin maps each Agent Zero project to scope `a0-<project-slug>` (strategy `project`; e.g. `honcho-v2` -> `a0-honcho-v2`) and registers each chat's session non-blockingly. Honcho backfills existing conclusions into the scope retroactively — no re-derivation cost. Pass the tool's optional `scope` argument (plain name or `a0-`-prefixed) to deliberately recall/search/ask within one scope; omit it for the global view. On SDKs older than 2.4.0, automatic scope use silently falls back to global behavior and an explicit tool `scope` returns a clear error. External MCP clients may use the same scope IDs natively.
+
 ## Identity and single-writer rule
 
 Use one stable human peer in a shared workspace when A0 and external MCP clients should share memory. Give each assistant/client a distinct stable peer and its own namespaced sessions. A0 writes only A0 conversations; each MCP client writes only its own. All may read the shared workspace.
