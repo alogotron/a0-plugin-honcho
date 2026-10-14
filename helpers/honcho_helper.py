@@ -19,6 +19,33 @@ from .worker import WorkerSettings, get_singleton, start_singleton, stop_all
 if TYPE_CHECKING:
     from agent import AgentContext
 
+def _self_heal_sdk() -> bool:
+    """Container recreation resets /opt/venv-a0 to the image, losing pip-installed
+    packages. If the honcho SDK import failed, reinstall plugin requirements once
+    and retry the import in-process. No-op cost when the SDK is present."""
+    global Honcho, SessionPeerConfig
+    try:
+        import importlib
+        import subprocess
+        import sys
+
+        requirements = Path(__file__).resolve().parents[1] / "requirements.txt"
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-q", "-r", str(requirements)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=180,
+        )
+        if result.returncode != 0:
+            return False
+        Honcho = importlib.import_module("honcho").Honcho
+        SessionPeerConfig = importlib.import_module("honcho.session").SessionPeerConfig
+        return True
+    except Exception:
+        return False
+
+
 try:
     from honcho import Honcho
     from honcho.session import SessionPeerConfig
@@ -28,6 +55,7 @@ except ImportError:
     HONCHO_AVAILABLE = False
     Honcho = None  # type: ignore[assignment,misc]
     SessionPeerConfig = None  # type: ignore[assignment,misc]
+    HONCHO_AVAILABLE = _self_heal_sdk()
 
 CLOUD_API_URL = "https://api.honcho.dev"
 HOSTED_MCP_URL = "https://mcp.honcho.dev"
