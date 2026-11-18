@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from collections.abc import Iterable
 import hashlib
 import json
 import os
@@ -1229,6 +1230,18 @@ def get_user_context(
             context_kwargs["scope"] = active_scope
         result = client.session(session_id).context(**context_kwargs)
         text = _context_text(result, max_chars=max(1000, budget * 6))
+        if text is None:
+            text = ""
+        citations = citations_context(
+            query,
+            context,
+            effective=effective,
+            top_k=effective.recall_search_top_k,
+            distance=effective.recall_max_distance,
+            max_conclusions=effective.recall_max_conclusions,
+        )
+        if citations:
+            text = f"{text}\n\n{citations}" if text else citations
         if text:
             text = _mask_outbound(context, text, effective)
         with _context_lock:
@@ -1244,6 +1257,197 @@ def get_user_context(
             event = _context_inflight.pop(key, None)
             if event:
                 event.set()
+
+
+def _client_http(
+    context: Optional["AgentContext"], effective: Optional[EffectiveConfig] = None
+) -> Optional[Any]:
+    """The SDK client's internal HTTP layer, for endpoints the SDK does not wrap."""
+    client = get_client(context, config=effective)
+    if client is None:
+        return None
+    return getattr(client, "_http", None)
+
+
+_RUN_ID = re.compile(r"^[A-Za-z0-9._:-]{1,256}$")
+
+
+def list_dream_runs(
+    context: Optional["AgentContext"] = None,
+    *,
+    effective: Optional[EffectiveConfig] = None,
+    observed_id: Optional[str] = None,
+    observer_id: Optional[str] = None,
+    size: int = 10,
+) -> list[dict[str, Any]]:
+    """List dream runs (newest first) via the Representation History REST endpoint.
+
+    The SDK (honcho-ai 2.5.1) does not wrap POST
+    /v3/workspaces/{id}/dreams/list, so this calls it through the client's
+    own HTTP layer with the same auth and retry behavior.
+    """
+    eff = effective or get_effective_config(context)
+    http = _client_http(context, effective=eff)
+    if http is None:
+        return []
+    body: dict[str, Any] = {}
+    if observed_id:
+        body["observed_id"] = str(observed_id)
+    if observer_id:
+        body["observer_id"] = str(observer_id)
+    data = http.post(
+        f"/v3/workspaces/{eff.workspace_id}/dreams/list",
+        body=body or None,
+        query={"page": 1, "size": max(1, min(100, int(size)))},
+    )
+    items = data.get("items", []) if isinstance(data, dict) else data
+    return [item for item in (items or []) if isinstance(item, dict)]
+
+
+def get_dream_run(
+    run_id: str,
+    context: Optional["AgentContext"] = None,
+    *,
+    effective: Optional[EffectiveConfig] = None,
+) -> Optional[dict[str, Any]]:
+    """Fetch one dream run with its created/removed conclusions and peer-card diff."""
+    identifier = str(run_id or "").strip()
+    if not _RUN_ID.fullmatch(identifier):
+        return None
+    eff = effective or get_effective_config(context)
+    http = _client_http(context, effective=eff)
+    if http is None:
+        return None
+    data = http.get(f"/v3/workspaces/{eff.workspace_id}/dreams/{identifier}")
+    return data if isinstance(data, dict) else None
+
+
+def search_conclusions_with_citations(
+    query: str,
+    context: Optional["AgentContext"] = None,
+    *,
+    effective: Optional[EffectiveConfig] = None,
+    top_k: int = 10,
+    distance: Optional[float] = None,
+) -> list[dict[str, Any]]:
+    """Pair-scoped conclusion search returning raw dicts including source_message_ids.
+
+    The SDK's ConclusionResponse drops source_message_ids, so conclusion
+    citations go through the REST endpoint directly.
+    """
+    eff = effective or get_effective_config(context)
+    http = _client_http(context, effective=eff)
+    if http is None:
+        return []
+    body: dict[str, Any] = {
+        "query": str(query),
+        "top_k": max(1, min(100, int(top_k))),
+        "filters": {
+            "observer_id": eff.agent_peer_id,
+            "observed_id": eff.user_peer_id,
+        },
+    }
+    if distance is not None:
+        body["distance"] = max(0.0, min(1.0, float(distance)))
+    data = http.post(
+        f"/v3/workspaces/{eff.workspace_id}/conclusions/query", body=body
+    )
+    items = data if isinstance(data, list) else (data or {}).get("items", [])
+    return [item for item in (items or []) if isinstance(item, dict)]
+
+
+def _citation_lines(items: Iterable[Any], limit: int) -> list[str]:
+    """Render conclusions with their citation ids, e.g. `content [cited: a, b]`."""
+    lines: list[str] = []
+    for item in items:
+        if isinstance(item, Mapping):
+            content = str(item.get("content") or "").strip()
+            citations = item.get("source_message_ids") or []
+        else:
+            content = str(getattr(item, "content", "") or "").strip()
+            citations = getattr(item, "source_message_ids", None) or []
+        if not content:
+            continue
+        ids = [str(c).strip() for c in citations if str(c).strip()]
+        suffix = f" [cited: {', '.join(ids)}]" if ids else ""
+        lines.append(f"- {content}{suffix}"[:1400])
+        if len(lines) >= limit:
+            break
+    return lines
+
+
+def citations_context(
+    query: str,
+    context: Optional["AgentContext"] = None,
+    *,
+    effective: Optional[EffectiveConfig] = None,
+    top_k: int = 8,
+    distance: Optional[float] = None,
+    max_conclusions: int = 20,
+) -> Optional[str]:
+    """A bounded `Conclusions with source citations` block, or None."""
+    eff = effective or get_effective_config(context)
+    if not str(query or "").strip():
+        return None
+    try:
+        items = search_conclusions_with_citations(
+            query,
+            context,
+            effective=eff,
+            top_k=top_k,
+            distance=distance,
+        )
+    except Exception as exc:
+        _log(context, f"Citation lookup failed: {redact_text(exc, eff)}", "warning")
+        return None
+    cited = [
+        item
+        for item in items
+        if (item.get("source_message_ids") if isinstance(item, Mapping) else None)
+    ]
+    lines = _citation_lines(cited, max(1, min(50, int(max_conclusions))))
+    if not lines:
+        return None
+    return "Conclusions with source citations:" + chr(10) + chr(10).join(lines)
+
+
+_DREAM_RUN_FIELDS = (
+    "id",
+    "observer_id",
+    "observed_id",
+    "dream_type",
+    "trigger_reason",
+    "status",
+    "created_count",
+    "removed_count",
+    "peer_card_updated",
+    "started_at",
+    "finished_at",
+)
+
+
+def recent_dream_runs(
+    effective: EffectiveConfig, *, limit: int = 5
+) -> Optional[list[dict[str, Any]]]:
+    """Sanitized latest dream runs about the user peer, for status display."""
+    try:
+        client = get_probe_client(effective)
+        http = getattr(client, "_http", None)
+        if http is None:
+            return None
+        data = http.post(
+            f"/v3/workspaces/{effective.workspace_id}/dreams/list",
+            body={"observed_id": effective.user_peer_id},
+            query={"page": 1, "size": max(1, min(20, int(limit)))},
+        )
+        items = data.get("items", []) if isinstance(data, dict) else data
+        return [
+            {key: item.get(key) for key in _DREAM_RUN_FIELDS}
+            for item in (items or [])
+            if isinstance(item, dict)
+        ]
+    except Exception:
+        return None
 
 
 def clear_context_cache(

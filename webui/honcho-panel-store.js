@@ -33,6 +33,10 @@ const model = {
     return this.data?.scope || { view: "global", strategy: "off", resolved: null, sdk_support: false };
   },
 
+  get dreams() {
+    return this.data?.dreams || null;
+  },
+
   get scopeLabel() {
     const scope = this.scope;
     if (!scope.resolved) return "global";

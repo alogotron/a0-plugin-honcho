@@ -9,6 +9,7 @@ Actions:
 - `forget`: delete one conclusion; requires the exact `conclusion_id` and `confirm: true`. Obtain user confirmation before calling.
 - `status`: local sanitized configuration/outbox/worker status (includes the resolved scope view); no connectivity probe.
 - `dream`: explicitly schedule Honcho consolidation for the current chat.
+- `dreams`: list recent dream runs (representation history, newest first) with `limit` (1-20); pass `run_id` to fetch one run's full audit trail (created conclusions with sources, removed conclusions, peer card before/after).
 
 Honcho scopes (SDK >= 2.4.0): a scope groups sessions for visibility-only filtering; peer representations stay unified. The plugin normally registers each chat into scope `a0-<project-slug>` (strategy `project`). Pass `scope` only to deliberately recall, search, or ask within one project's scope; omit it for the global view. Plain names (`honcho-v2`) and prefixed IDs (`a0-honcho-v2`) are both accepted. On older SDKs, scope use returns a clear error instead of silently falling back.
 

@@ -209,6 +209,11 @@ class HonchoStatus(ApiHandler):
             },
             "cache": cache,
             "outbox": outbox_state,
+            "dreams": (
+                hh.recent_dream_runs(effective, limit=5)
+                if hasattr(hh, "recent_dream_runs")
+                else None
+            ),
             "client_cached": cache["clients"] > 0,
             "context_cache_entries": cache["contexts"],
             "checks": None,

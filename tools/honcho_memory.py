@@ -11,7 +11,7 @@ from typing import Any
 from helpers.tool import Response, Tool
 from usr.plugins.honcho.helpers import honcho_helper as hh
 
-_ACTIONS = {"recall", "search", "ask", "remember", "forget", "status", "dream"}
+_ACTIONS = {"recall", "search", "ask", "remember", "forget", "status", "dream", "dreams"}
 _SCOPES = {"peer", "session", "workspace"}
 _REASONING_LEVELS = {"minimal", "low", "medium", "high", "max"}
 _CONCLUSION_ID = re.compile(r"^[A-Za-z0-9._:-]{1,256}$")
@@ -31,6 +31,7 @@ class HonchoMemory(Tool):
         conclusion_id: str = "",
         confirm: bool = False,
         reasoning_level: str = "minimal",
+        run_id: str = "",
         **kwargs: Any,
     ) -> Response:
         del kwargs
@@ -113,10 +114,12 @@ class HonchoMemory(Tool):
                 )
                 if domain == "peer":
                     items = await asyncio.to_thread(
-                        conclusions.query,
+                        hh.search_conclusions_with_citations,
                         safe_query,
-                        bounded_limit,
-                        effective.recall_max_distance,
+                        context,
+                        effective=effective,
+                        top_k=bounded_limit,
+                        distance=effective.recall_max_distance,
                     )
                 elif domain == "session":
                     items = await asyncio.to_thread(
@@ -212,6 +215,42 @@ class HonchoMemory(Tool):
                     f"Deleted conclusion {identifier}.",
                 )
 
+            if selected == "dreams":
+                if run_id:
+                    detail = await asyncio.to_thread(
+                        hh.get_dream_run,
+                        self._required(run_id, "run_id"),
+                        context,
+                        effective=effective,
+                    )
+                    if detail is None:
+                        raise ValueError("run_id is invalid, or the dream run was not found")
+                    return self._safe_response(
+                        context,
+                        effective,
+                        self._format_dream_run(detail),
+                    )
+                bounded_limit = self._bounded_int(limit, default=5, minimum=1, maximum=20)
+                runs = await asyncio.to_thread(
+                    hh.list_dream_runs,
+                    context,
+                    effective=effective,
+                    observed_id=effective.user_peer_id,
+                    observer_id=effective.agent_peer_id,
+                    size=bounded_limit,
+                )
+                if not runs:
+                    return self._safe_response(
+                        context,
+                        effective,
+                        "No dream runs found for this representation.",
+                    )
+                return self._safe_response(
+                    context,
+                    effective,
+                    self._format_dream_runs(runs),
+                )
+
             await asyncio.to_thread(
                 client.schedule_dream,
                 observer=observer,
@@ -290,18 +329,92 @@ class HonchoMemory(Tool):
                 identifier = str(item.get("id") or "").strip()
                 peer_id = str(item.get("peer_id") or "").strip()
                 content = str(item.get("content") or "").strip()
+                citations = item.get("source_message_ids") or []
             else:
                 identifier = str(getattr(item, "id", "") or "").strip()
                 peer_id = str(getattr(item, "peer_id", "") or "").strip()
                 content = str(getattr(item, "content", "") or "").strip()
+                citations = getattr(item, "source_message_ids", None) or []
             if not content:
                 continue
+            ids = [str(c).strip() for c in citations if str(c).strip()]
+            citation_suffix = f" [cited: {', '.join(ids)}]" if ids else ""
             prefix = " · ".join(part for part in (identifier, peer_id) if part)
-            line = f"{prefix}: {content}" if prefix else content
+            line = f"{prefix}: {content}{citation_suffix}" if prefix else f"{content}{citation_suffix}"
             lines.append(line[:1400])
             if len(lines) >= limit:
                 break
         return "\n".join(lines) or "No results."
+
+    @staticmethod
+    def _format_dream_runs(runs: Iterable[Mapping[str, Any]]) -> str:
+        lines: list[str] = []
+        for run in runs:
+            if not isinstance(run, Mapping):
+                continue
+            identifier = str(run.get("id") or "").strip()
+            if not identifier:
+                continue
+            status = str(run.get("status") or "—")
+            kind = str(run.get("dream_type") or "—")
+            created = run.get("created_count")
+            removed = run.get("removed_count")
+            card = "+card" if run.get("peer_card_updated") else ""
+            started = str(run.get("started_at") or "")
+            lines.append(
+                f"{identifier}: {status} · {kind} · created {created} · removed {removed}{card} · {started}"
+            )
+        return "\n".join(lines) or "No dream runs found."
+
+    @staticmethod
+    def _format_dream_run(detail: Mapping[str, Any]) -> str:
+        def ref_text(ref: Any) -> str:
+            if isinstance(ref, Mapping):
+                content = str(ref.get("content") or "").strip()
+                status = str(ref.get("status") or "current")
+                identifier = str(ref.get("id") or "").strip()
+            else:
+                content = str(getattr(ref, "content", "") or "").strip()
+                status = str(getattr(ref, "status", "current"))
+                identifier = str(getattr(ref, "id", "") or "").strip()
+            if not content:
+                return f"[{status}]" if identifier else "[unavailable]"
+            return content[:600] if status == "current" else f"({status}) {content[:600]}"
+
+        parts: list[str] = [HonchoMemory._format_dream_runs([detail])]
+        created = detail.get("created") or []
+        if created:
+            lines = []
+            for entry in created:
+                if not isinstance(entry, Mapping):
+                    continue
+                conclusion = ref_text(entry.get("conclusion"))
+                sources = "; ".join(ref_text(s) for s in (entry.get("sources") or []))
+                specialist = str(entry.get("specialist") or "")
+                specialist_suffix = f" [{specialist}]" if specialist else ""
+                lines.append(
+                    f"+ {conclusion}{specialist_suffix}" + (f"\n  from: {sources}" if sources else "")
+                )
+            if lines:
+                parts.append("Created conclusions:\n" + "\n".join(lines))
+        removed = detail.get("removed") or []
+        if removed:
+            lines = []
+            for entry in removed:
+                if not isinstance(entry, Mapping):
+                    continue
+                content = str(entry.get("content") or "").strip()[:600]
+                replaced = str(entry.get("replaced_by") or "").strip()
+                replaced_suffix = f" (replaced by {replaced})" if replaced else ""
+                lines.append(f"- {content}{replaced_suffix}")
+            if lines:
+                parts.append("Removed conclusions:\n" + "\n".join(lines))
+        peer_card = detail.get("peer_card")
+        if isinstance(peer_card, Mapping) and (peer_card.get("before") or peer_card.get("after")):
+            before = " | ".join(str(item) for item in (peer_card.get("before") or []))
+            after = " | ".join(str(item) for item in (peer_card.get("after") or []))
+            parts.append(f"Peer card before: {before or '—'}\nPeer card after: {after or '—'}")
+        return "\n\n".join(parts)
 
     @staticmethod
     def _safe_response(context: Any, effective: Any, message: Any) -> Response:

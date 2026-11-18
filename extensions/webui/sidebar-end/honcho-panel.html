@@ -53,6 +53,15 @@
                 </dl>
               </section>
 
+              <template x-if="$store.honcho.dreams">
+                <section class="hc-card">
+                  <small>RECENT DREAM RUNS</small>
+                  <template x-for="run in $store.honcho.dreams" :key="run.id">
+                    <span><code x-text="run.id"></code> · <span x-text="run.status"></span> · <span x-text="`${run.created_count ?? 0}+/${run.removed_count ?? 0}-`"></span><span x-text="run.peer_card_updated ? ' · card' : ''"></span> · <span x-text="run.started_at || '—'"></span></span>
+                  </template>
+                </section>
+              </template>
+
               <dl class="hc-grid hc-runtime">
                 <dt>API mode</dt><dd x-text="$store.honcho.data.mode"></dd>
                 <dt>API endpoint</dt><dd x-text="$store.honcho.data.api_url"></dd>

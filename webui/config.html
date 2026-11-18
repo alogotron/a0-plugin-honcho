@@ -47,6 +47,9 @@
       <div class="field"><div class="field-label"><div class="field-title">Debug logging</div></div><div class="field-control"><label class="toggle"><input type="checkbox" x-model="config.honcho_debug"><span class="toggler"></span></label></div></div>
 
       <div class="section-description">Set HONCHO_API_KEY in Settings → Secrets for hosted Honcho. The plugin writes only its own Agent Zero conversations; external MCP clients should write only their own namespaced sessions.</div>
+
+      <div class="section-title">Dream history</div>
+      <div class="section-description">The honcho_memory tool exposes a <code>dreams</code> action (list recent dream runs; pass a <code>run_id</code> for the full audit trail of one dream) and the sidebar panel shows the latest runs. Recall output appends conclusion citation ids as <code>[cited: ...]</code> where the server recorded them (Honcho v3.6.1+; REST endpoints not yet in the honcho SDK).</div>
     </div>
   </template>
 </div>
